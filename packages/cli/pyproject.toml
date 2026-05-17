@@ -1,0 +1,22 @@
+[project]
+name = "bug-report-cli"
+version = "1.0.0"
+description = "CLI for filing bug reports against any bug-report-widget backend. Usable by humans and AI agents."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Ken Moynihan" }]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+report-bug = "bug_report_cli:main_entry"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bug_report_cli*"]

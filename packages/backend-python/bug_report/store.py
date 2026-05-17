@@ -243,11 +243,14 @@ class FilesystemStore:
                 d = json.loads(ln)
             except json.JSONDecodeError:
                 continue
+            # Accept both camelCase (current wire format) and snake_case
+            # (legacy on-disk format written by the claude-tmux-dashboard
+            # before it adopted this package). Lenient read; strict write.
             out.append(AuditEntry(
-                changed_at=d.get("changedAt", ""),
-                to_status=d.get("toStatus", ""),
-                from_status=d.get("fromStatus"),
-                changed_by=d.get("changedBy", ""),
+                changed_at=d.get("changedAt") or d.get("changed_at", ""),
+                to_status=d.get("toStatus") or d.get("to_status", ""),
+                from_status=d.get("fromStatus") if "fromStatus" in d else d.get("from_status"),
+                changed_by=d.get("changedBy") or d.get("changed_by", ""),
                 note=d.get("note", ""),
             ))
         return out

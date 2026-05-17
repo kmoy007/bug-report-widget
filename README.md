@@ -75,7 +75,7 @@ These come from the pattern doc, restated as testable contracts:
 
 1. **One review queue.** Web-filed, agent-filed, CLI-filed bugs all land in the same store. No privileged "agent feedback" channel. The contract test in `e2e/` verifies this.
 2. **Every transition writes an audit row.** No silent state changes. The Python and Node stores both enforce this; cross-stack test pins it down.
-3. **Same backend, different storage.** Backends accept a `Store` interface. Reference implementations: `InMemoryStore` (tests), `FilesystemStore` (single-host apps), `AzureTablesStore` (leap-timesheet), `SqliteStore` (medium scale). Drop in your own.
+3. **Same backend, different storage.** Backends accept a `Store` interface. Reference implementations shipping today: `InMemoryStore` (tests), `FilesystemStore` (single-host apps), `AzureTablesStore` (Node only, ported from leap-timesheet). Drop in your own (Postgres, SQLite, S3 …) by implementing the `Store` shape.
 4. **Screenshot is optional, always.** Servers MUST accept reports without one. The widget falls back gracefully on Safari canvas-taint or timeout.
 5. **Spec is the contract.** If a behavior matters, it's in `packages/spec/openapi.yaml` and the cross-stack contract test will fail if either backend drifts.
 

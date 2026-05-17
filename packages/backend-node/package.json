@@ -10,7 +10,8 @@
   ],
   "exports": {
     ".": "./src/index.js",
-    "./store": "./src/store.js"
+    "./store": "./src/store.js",
+    "./azure-tables": "./src/stores/azure-tables.js"
   },
   "scripts": {
     "test": "node --test tests/"
@@ -21,12 +22,21 @@
   "dependencies": {
     "express": "^4.19.0"
   },
-  "keywords": ["bug-report", "express", "feedback", "screenshot"],
+  "keywords": [
+    "bug-report",
+    "express",
+    "feedback",
+    "screenshot"
+  ],
   "author": "Ken Moynihan",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kmoy007/bug-report-widget.git",
     "directory": "packages/backend-node"
+  },
+  "optionalDependencies": {
+    "@azure/data-tables": "^13.3.2",
+    "@azure/storage-blob": "^12.31.0"
   }
 }

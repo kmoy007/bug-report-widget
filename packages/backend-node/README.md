@@ -59,8 +59,36 @@ In practice the leap-timesheet migration plan is to lift `createBugsRouter` and 
 |---|---|
 | `InMemoryStore` | Tests, dev. Map-backed; lost on process exit. |
 | `FilesystemStore(root)` | Single-host production. One JSON per bug + audit JSONL + PNG. |
+| `AzureTablesStore` | Azure Tables + Blob backend. Same on-disk schema as leap-timesheet's original implementation. |
 
 Implement the `Store` shape (`putBug`, `getBug`, `listBugs`, `updateStatus`, `appendAudit`, `listAudit`, `getScreenshot`) for any other backend. See [`src/store.js`](src/store.js).
+
+### `AzureTablesStore`
+
+Ported from leap-timesheet's `api/bugs/store.js`. Lift-and-shift compatible: same `BugReports` + `BugReportsAudit` tables, same column names, same `screenshots` blob container layout, same `partitionKey = yyyy-mm-dd` partitioning. Existing leap data is readable; future Azure-hosted Node apps can adopt it directly.
+
+```js
+import { createBugsRouter } from "bug-report-node";
+import { AzureTablesStore } from "bug-report-node/azure-tables";
+
+const store = new AzureTablesStore({
+  connectionString: process.env.AZURE_STORAGE_CONN,
+  // table:         "BugReports",        // optional overrides
+  // auditTable:    "BugReportsAudit",
+  // blobContainer: "screenshots",
+  // sasTtlSec:     300,
+});
+
+app.use("/api/bugs", createBugsRouter({ store, isAdmin }));
+```
+
+Peer dependencies (declared as optional in `package.json` — consumers who don't use Azure don't pay for them):
+- `@azure/data-tables` ≥ 13.3.2
+- `@azure/storage-blob` ≥ 12.31.0
+
+The store imports them lazily; if you construct an `AzureTablesStore` without installing them, the first call that needs Azure will throw with a clear error.
+
+Tests inject in-memory doubles via the constructor (`{ tableClient, auditTableClient, blobContainer }`) — the same shape leap's `tests/helpers/mock-azure-tables.js` uses. 12 unit tests cover the round-trips and the OData escaping invariant.
 
 ## Tests
 

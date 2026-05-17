@@ -1,0 +1,32 @@
+{
+  "name": "bug-report-node",
+  "version": "1.0.0",
+  "description": "Express router + storage interface implementing the bug-report-widget API spec.",
+  "main": "src/index.js",
+  "type": "module",
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./store": "./src/store.js"
+  },
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.0"
+  },
+  "keywords": ["bug-report", "express", "feedback", "screenshot"],
+  "author": "Ken Moynihan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kmoy007/bug-report-widget.git",
+    "directory": "packages/backend-node"
+  }
+}

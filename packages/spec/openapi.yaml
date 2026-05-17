@@ -1,0 +1,309 @@
+openapi: 3.1.0
+info:
+  title: Bug Report API
+  version: 1.0.0
+  description: |
+    The API contract every bug-report backend must honor. The widget
+    (packages/widget) and the CLI (packages/cli) speak this protocol;
+    backends implement it. A cross-stack Playwright suite (e2e/) drives
+    every reference implementation against the same scenarios.
+
+    Auth is intentionally undefined at the spec level — each consuming
+    app gates access according to its own model (admin email allowlist,
+    SSO group, Tailscale host, whatever). The spec defines *behaviour*,
+    not *who can do what*.
+
+servers:
+  - url: /api
+    description: Mounted relative to the consuming app's API root.
+
+paths:
+  /bugs:
+    post:
+      summary: File a new bug report
+      description: |
+        Accepts a JSON body or multipart/form-data. `details` is required.
+        Servers MUST stamp `addedAt` (UTC ISO-8601) and assign an `id`.
+      operationId: createBug
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BugCreate"
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/BugCreate"
+      responses:
+        "201":
+          description: Bug filed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id:
+                    type: string
+                    example: bug-20260516-181523-a3b91f2
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          description: Body exceeds size limits (details or screenshot)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    get:
+      summary: List bug reports (admin)
+      operationId: listBugs
+      parameters:
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/Status"
+        - in: query
+          name: days
+          description: Filter to bugs filed within the last N days. Default 30.
+          schema:
+            type: integer
+            minimum: 1
+            default: 30
+      responses:
+        "200":
+          description: A list of bugs sorted newest-first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bugs]
+                properties:
+                  bugs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BugSummary"
+
+  /bugs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/BugId"
+
+    get:
+      summary: Fetch a single bug with audit history
+      operationId: getBug
+      responses:
+        "200":
+          description: Full bug record including audit trail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bug"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      summary: Transition status (admin)
+      description: |
+        Implementations MUST write an audit row on every successful
+        transition and MUST be no-op when status == current status.
+      operationId: patchBug
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  $ref: "#/components/schemas/Status"
+                note:
+                  type: string
+                  maxLength: 500
+                changedBy:
+                  type: string
+                  description: Admin identity, when not derivable from auth.
+      responses:
+        "200":
+          description: Updated bug
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bug"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /bugs/{id}/screenshot:
+    parameters:
+      - $ref: "#/components/parameters/BugId"
+    get:
+      summary: Download the captured screenshot
+      operationId: getBugScreenshot
+      responses:
+        "200":
+          description: PNG bytes (or 302 to a signed URL — server's choice)
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "302":
+          description: Redirect to a short-TTL signed URL
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  parameters:
+    BugId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        pattern: '^bug-\d{8}-\d{6}-[a-f0-9]{6}$'
+        example: bug-20260516-181523-a3b91f2
+
+  schemas:
+    Status:
+      type: string
+      enum: [open, triaged, resolved, declined]
+
+    BugCreate:
+      type: object
+      required: [details]
+      properties:
+        title:
+          type: string
+          maxLength: 100
+          description: Optional. If absent, the first line of `details` is used.
+        details:
+          type: string
+          maxLength: 10240
+          description: Body of the report. 10 KB max.
+        tags:
+          oneOf:
+            - type: array
+              items: { type: string }
+            - type: string
+              description: Comma-separated when sent as form-encoded.
+        addedBy:
+          type: string
+          description: 'web | agent | cli | ios:<device> | …'
+          default: web
+        actorEmail:
+          type: string
+          format: email
+        metaUrl:
+          type: string
+          format: uri
+          maxLength: 500
+        metaUserAgent:
+          type: string
+          maxLength: 300
+        metaBuildSha:
+          type: string
+          maxLength: 40
+        screenshot:
+          type: string
+          description: |
+            data: URL or raw base64 PNG. Max 5 MB after decode. Optional;
+            servers MUST accept a report without a screenshot.
+        transcript:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptTurn"
+          description: |
+            Optional last-N chat turns for agent-filed reports. Names-only
+            tool calls; no attachment bytes; no system prompt. See
+            bug-report-pattern.md "Bundling the chat transcript".
+
+    TranscriptTurn:
+      type: object
+      properties:
+        ts:
+          type: string
+          format: date-time
+        model:
+          type: string
+        userMessage:
+          type: string
+        assistantResponse:
+          type: string
+        toolCalls:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+
+    BugSummary:
+      type: object
+      required: [id, title, tags, status, addedBy, addedAt, screenshot]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        status: { $ref: "#/components/schemas/Status" }
+        addedBy: { type: string }
+        actorEmail: { type: string }
+        addedAt: { type: string, format: date-time }
+        screenshot:
+          type: boolean
+          description: True iff a screenshot was stored.
+
+    Bug:
+      allOf:
+        - $ref: "#/components/schemas/BugSummary"
+        - type: object
+          required: [details, audit]
+          properties:
+            details: { type: string }
+            metaUrl: { type: string }
+            metaUserAgent: { type: string }
+            metaBuildSha: { type: string }
+            transcript:
+              type: array
+              items: { $ref: "#/components/schemas/TranscriptTurn" }
+              nullable: true
+            audit:
+              type: array
+              items: { $ref: "#/components/schemas/AuditEntry" }
+
+    AuditEntry:
+      type: object
+      required: [changedAt, toStatus]
+      properties:
+        changedAt: { type: string, format: date-time }
+        changedBy: { type: string }
+        fromStatus:
+          oneOf:
+            - $ref: "#/components/schemas/Status"
+            - type: "null"
+        toStatus: { $ref: "#/components/schemas/Status" }
+        note: { type: string }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+  responses:
+    BadRequest:
+      description: Validation failure
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No bug with this ID
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

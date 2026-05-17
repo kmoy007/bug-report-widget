@@ -1,0 +1,35 @@
+# Node
+node_modules/
+npm-debug.log*
+.npm/
+dist/
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.tox/
+.coverage
+coverage/
+htmlcov/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Local runtime state (e2e fixtures)
+e2e/.tmp/
+packages/**/state/
+packages/**/.cache/

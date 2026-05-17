@@ -1,0 +1,543 @@
+/* bug-report.js — portable in-app bug reporting widget.
+ *
+ * Drop:   <script src="html2canvas.min.js" defer></script>
+ *         <script src="bug-report.js" defer></script>
+ * Result: floating 🐛 button bottom-right, captures viewport on tap,
+ *         shows a modal with preview + textarea, POSTs to /api/bugs.
+ *
+ * Configure by setting window.BugReportConfig BEFORE this script loads:
+ *   window.BugReportConfig = {
+ *     endpoint: "/api/bugs",            // default
+ *     idPrefix: "bug-report",           // collision-proof your DOM
+ *     buildSha: "abc1234",              // or () => string
+ *     theme: { accent: "#007AFF", ... } // override CSS tokens
+ *     position: { bottom: 20, right: 20 } // px, before user drag
+ *   };
+ *
+ * UMD: also exports `BugReportWidget` on `window` for tests + programmatic
+ * use. In Node (no DOM), exports `createController` etc. for unit testing
+ * the pure pieces.
+ *
+ * Distilled from leap-timesheet's lib/bug-report.js + claude-tmux-dashboard's
+ * static/bug-report.js. See bug-report-pattern.md for the design rationale.
+ */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory();
+  } else {
+    var api = factory();
+    root.BugReportWidget = api;
+    if (typeof window !== "undefined" && typeof document !== "undefined") {
+      if (!window.__bugReportSkipAutoInit) api.init();
+    }
+  }
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  var DEFAULTS = {
+    endpoint: "/api/bugs",
+    idPrefix: "bug-report",
+    buildSha: "",
+    position: { bottom: 20, right: 20 },
+    captureTimeoutMs: 6000,
+    storageKey: "bug-report-button-position-v2",
+    theme: {
+      accent: "#007AFF",
+      buttonBg: "#ffffff",
+      buttonInk: "#1a1a1e",
+      modalBg: "#ffffff",
+      modalInk: "#1a1a1e",
+      mutedInk: "#666666",
+      errorInk: "#c0392b",
+      toastBg: "rgba(40,40,42,0.92)",
+      toastInk: "#ffffff",
+      font: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif',
+      radius: "12px",
+    },
+  };
+
+  function mergeConfig(user) {
+    user = user || {};
+    var out = {};
+    for (var k in DEFAULTS) out[k] = DEFAULTS[k];
+    for (var k2 in user) {
+      if (k2 === "theme" || k2 === "position") {
+        var merged = {};
+        for (var t in DEFAULTS[k2]) merged[t] = DEFAULTS[k2][t];
+        for (var t2 in user[k2]) merged[t2] = user[k2][t2];
+        out[k2] = merged;
+      } else {
+        out[k2] = user[k2];
+      }
+    }
+    return out;
+  }
+
+  // ─── Pure helpers (testable in Node) ───────────────────────────────
+
+  // True if a canvas appears blank (all transparent / all white). Safari
+  // edge case: html2canvas occasionally returns a tainted canvas with no
+  // pixel data. Density of 8×8 (64 samples) reliably finds at least one
+  // non-white pixel on any page with real content; 4×4 sometimes false-
+  // negatives on wide layouts with white cards.
+  function isBlankCanvas(canvas) {
+    if (!canvas || !canvas.getContext) return true;
+    if (!canvas.width || !canvas.height) return true;
+    var ctx;
+    try { ctx = canvas.getContext("2d"); } catch (e) { return true; }
+    if (!ctx) return true;
+    try {
+      var w = canvas.width, h = canvas.height;
+      var n = 8;
+      for (var x = 0; x < n; x++) {
+        for (var y = 0; y < n; y++) {
+          var px = Math.max(0, Math.min(w - 1, Math.floor((x + 0.5) * w / n)));
+          var py = Math.max(0, Math.min(h - 1, Math.floor((y + 0.5) * h / n)));
+          var data = ctx.getImageData(px, py, 1, 1).data;
+          if (data[3] > 0 && !(data[0] === 255 && data[1] === 255 && data[2] === 255)) {
+            return false;
+          }
+        }
+      }
+      return true;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function buildPostBody(opts) {
+    return {
+      title: opts.title || (opts.details || "").split("\n")[0].slice(0, 100),
+      details: String(opts.details || "").slice(0, 10 * 1024),
+      screenshot: opts.screenshot || null,
+      metaUrl: opts.metaUrl || "",
+      metaUserAgent: opts.metaUserAgent || "",
+      metaBuildSha: opts.metaBuildSha || "",
+      tags: Array.isArray(opts.tags) ? opts.tags : ["bug"],
+      addedBy: opts.addedBy || "web",
+    };
+  }
+
+  // ─── Capture (browser only) ────────────────────────────────────────
+
+  // Always resolves: data URL on success, null on failure, blank canvas,
+  // or timeout. The timeout is load-bearing — html2canvas has been known
+  // to hang on iOS Safari with certain CSS features (filters, blend
+  // modes, large viewports). Without it the widget can lock up.
+  function captureScreenshot(deps, cfg) {
+    var html2canvas = deps.html2canvas;
+    var doc = deps.document;
+    return new Promise(function (resolve) {
+      var done = false;
+      function settle(v) { if (!done) { done = true; resolve(v); } }
+      setTimeout(function () { settle(null); }, cfg.captureTimeoutMs);
+
+      if (!html2canvas || !doc) { settle(null); return; }
+      var btnId = cfg.idPrefix + "-button";
+      var modalId = cfg.idPrefix + "-modal";
+
+      try {
+        html2canvas(doc.body, {
+          useCORS: true,
+          logging: false,
+          scale: Math.min((typeof window !== "undefined" && window.devicePixelRatio) || 1, 2),
+          // Exclude the widget itself — both the floating button and the
+          // modal — so neither contributes pixels to its own screenshot.
+          // Also honor an opt-out attribute consumers can mark on their
+          // own elements (e.g. a password field, a sensitive widget).
+          ignoreElements: function (el) {
+            if (!el) return false;
+            if (el.id === btnId || el.id === modalId) return true;
+            if (el.getAttribute && el.getAttribute("data-bug-report-exclude") != null) return true;
+            return false;
+          },
+        }).then(function (canvas) {
+          try {
+            if (isBlankCanvas(canvas)) { settle(null); return; }
+            settle(canvas.toDataURL("image/png"));
+          } catch (e) { settle(null); }
+        }).catch(function () { settle(null); });
+      } catch (e) { settle(null); }
+    });
+  }
+
+  // ─── DOM construction (browser only) ───────────────────────────────
+
+  function styleStr(obj) {
+    var parts = [];
+    for (var k in obj) parts.push(k + ":" + obj[k]);
+    return parts.join(";");
+  }
+
+  function buildButton(doc, cfg, onClick) {
+    var btn = doc.createElement("button");
+    btn.id = cfg.idPrefix + "-button";
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Report a bug");
+    btn.setAttribute("data-bug-report-exclude", "true");
+    btn.textContent = "🐛";
+    btn.style.cssText = styleStr({
+      position: "fixed",
+      bottom: "calc(env(safe-area-inset-bottom, 0px) + " + cfg.position.bottom + "px)",
+      right: "calc(env(safe-area-inset-right, 0px) + " + cfg.position.right + "px)",
+      "z-index": "99998",
+      width: "52px",
+      height: "52px",
+      "border-radius": "50%",
+      border: "0",
+      background: cfg.theme.buttonBg,
+      color: cfg.theme.buttonInk,
+      "box-shadow": "0 6px 18px rgba(0,0,0,0.22), 0 0 0 0.5px rgba(0,0,0,0.08)",
+      "font-size": "24px",
+      "line-height": "1",
+      "font-family": cfg.theme.font,
+      cursor: "grab",
+      padding: "0",
+      "user-select": "none",
+      "touch-action": "none",
+      display: "flex",
+      "align-items": "center",
+      "justify-content": "center",
+    });
+
+    var pos = loadStoredPos(cfg);
+    if (pos) applyAbsolutePos(btn, pos.left, pos.top);
+
+    btn.addEventListener("click", function (e) {
+      if (btn._suppressClick) { btn._suppressClick = false; e.preventDefault(); e.stopPropagation(); return; }
+      onClick();
+    });
+    makeDraggable(btn, cfg);
+    return btn;
+  }
+
+  function applyAbsolutePos(btn, left, top) {
+    btn.style.left = left + "px";
+    btn.style.top = top + "px";
+    btn.style.right = "auto";
+    btn.style.bottom = "auto";
+  }
+
+  function loadStoredPos(cfg) {
+    try {
+      var raw = (typeof localStorage !== "undefined") && localStorage.getItem(cfg.storageKey);
+      if (!raw) return null;
+      var p = JSON.parse(raw);
+      if (typeof p.left === "number" && typeof p.top === "number") return p;
+    } catch (e) {}
+    return null;
+  }
+
+  function savePos(cfg, left, top) {
+    try { localStorage.setItem(cfg.storageKey, JSON.stringify({ left: left, top: top })); } catch (e) {}
+  }
+
+  function makeDraggable(btn, cfg) {
+    var dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0, moved = false;
+    btn.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      moved = false;
+      startX = e.clientX; startY = e.clientY;
+      var rect = btn.getBoundingClientRect();
+      origLeft = rect.left; origTop = rect.top;
+      btn.style.cursor = "grabbing";
+      try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    btn.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      var dx = e.clientX - startX, dy = e.clientY - startY;
+      if (Math.abs(dx) + Math.abs(dy) > 5) moved = true;
+      var W = btn.offsetWidth, H = btn.offsetHeight;
+      var L = Math.max(4, Math.min(window.innerWidth - W - 4, origLeft + dx));
+      var T = Math.max(4, Math.min(window.innerHeight - H - 4, origTop + dy));
+      applyAbsolutePos(btn, L, T);
+    });
+    function endDrag(e) {
+      if (!dragging) return;
+      dragging = false;
+      btn.style.cursor = "grab";
+      try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (moved) {
+        btn._suppressClick = true;
+        var rect = btn.getBoundingClientRect();
+        savePos(cfg, rect.left, rect.top);
+      }
+    }
+    btn.addEventListener("pointerup", endDrag);
+    btn.addEventListener("pointercancel", endDrag);
+  }
+
+  function buildModal(doc, cfg, callbacks) {
+    var t = cfg.theme;
+    var overlay = doc.createElement("div");
+    overlay.id = cfg.idPrefix + "-modal";
+    overlay.setAttribute("data-bug-report-exclude", "true");
+    overlay.style.cssText = styleStr({
+      position: "fixed", inset: "0", "z-index": "100000",
+      background: "rgba(0,0,0,0.5)",
+      display: "flex", "align-items": "flex-end", "justify-content": "center",
+      padding: "0", "font-family": t.font,
+    });
+
+    var box = doc.createElement("div");
+    box.style.cssText = styleStr({
+      background: t.modalBg, color: t.modalInk,
+      "border-radius": "16px 16px 0 0",
+      padding: "16px",
+      "max-width": "560px", width: "100%", "max-height": "92vh",
+      overflow: "auto",
+      "box-shadow": "0 -8px 24px rgba(0,0,0,0.2)",
+      "padding-bottom": "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+    });
+    overlay.appendChild(box);
+    // On wider screens, center the modal instead of bottom-sheet.
+    if (typeof window !== "undefined" && window.innerWidth > 720) {
+      overlay.style.alignItems = "center";
+      overlay.style.padding = "24px";
+      box.style.borderRadius = t.radius;
+      box.style.paddingBottom = "16px";
+    }
+
+    var title = doc.createElement("h2");
+    title.textContent = "Report a bug";
+    title.style.cssText = "font-size:18px;font-weight:600;margin:0 0 6px 0";
+    box.appendChild(title);
+
+    var hint = doc.createElement("p");
+    hint.id = overlay.id + "-hint";
+    hint.style.cssText = "font-size:13px;color:" + t.mutedInk + ";margin:0 0 12px 0";
+    hint.textContent = "Capturing screenshot…";
+    box.appendChild(hint);
+
+    var preview = doc.createElement("img");
+    preview.id = overlay.id + "-preview";
+    preview.alt = "";
+    preview.style.cssText = "display:none;max-width:100%;max-height:220px;border-radius:10px;margin:0 0 12px 0;background:rgba(0,0,0,0.04)";
+    box.appendChild(preview);
+
+    var textarea = doc.createElement("textarea");
+    textarea.id = overlay.id + "-textarea";
+    textarea.placeholder = "What happened? What did you expect?";
+    textarea.style.cssText = styleStr({
+      width: "100%", "min-height": "110px",
+      padding: "10px 12px",
+      border: "0.5px solid rgba(0,0,0,0.18)",
+      "border-radius": "10px",
+      "font-family": "inherit", "font-size": "16px",
+      "box-sizing": "border-box", resize: "vertical",
+      background: t.modalBg, color: t.modalInk,
+    });
+    box.appendChild(textarea);
+
+    var error = doc.createElement("div");
+    error.id = overlay.id + "-error";
+    error.style.cssText = "color:" + t.errorInk + ";font-size:13px;margin-top:8px;display:none";
+    box.appendChild(error);
+
+    var actions = doc.createElement("div");
+    actions.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:14px";
+    box.appendChild(actions);
+
+    var cancel = doc.createElement("button");
+    cancel.id = overlay.id + "-cancel";
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    cancel.style.cssText = "padding:8px 14px;border:0;background:transparent;color:" + t.accent + ";border-radius:10px;cursor:pointer;font:inherit";
+    actions.appendChild(cancel);
+
+    var submit = doc.createElement("button");
+    submit.id = overlay.id + "-submit";
+    submit.type = "button";
+    submit.textContent = "Submit";
+    submit.style.cssText = "padding:10px 18px;border:0;background:" + t.accent + ";color:#fff;border-radius:10px;cursor:pointer;font:inherit;font-weight:600";
+    actions.appendChild(submit);
+
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) callbacks.onCancel && callbacks.onCancel();
+    });
+    cancel.addEventListener("click", function () { callbacks.onCancel && callbacks.onCancel(); });
+    submit.addEventListener("click", function () {
+      callbacks.onSubmit && callbacks.onSubmit(textarea.value, function showError(msg) {
+        error.textContent = msg || "";
+        error.style.display = msg ? "block" : "none";
+      });
+    });
+    return overlay;
+  }
+
+  function buildToast(doc, cfg, message) {
+    var toast = doc.createElement("div");
+    toast.id = cfg.idPrefix + "-toast";
+    toast.setAttribute("data-bug-report-exclude", "true");
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    toast.textContent = message;
+    toast.style.cssText = styleStr({
+      position: "fixed",
+      top: "max(env(safe-area-inset-top, 0px), 14px)",
+      left: "50%", transform: "translateX(-50%)",
+      "z-index": "100001",
+      background: cfg.theme.toastBg, color: cfg.theme.toastInk,
+      padding: "10px 16px",
+      "border-radius": "14px",
+      "font-family": cfg.theme.font, "font-size": "14px",
+      "backdrop-filter": "blur(20px)",
+      "-webkit-backdrop-filter": "blur(20px)",
+    });
+    return toast;
+  }
+
+  function removeById(doc, id) {
+    var el = doc.getElementById(id);
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  // ─── Controller (one per page) ─────────────────────────────────────
+
+  function createController(opts) {
+    opts = opts || {};
+    var cfg = mergeConfig(opts.config);
+    var deps = {
+      document: opts.document,
+      window: opts.window,
+      fetch: opts.fetch,
+      html2canvas: opts.html2canvas,
+    };
+    var resolvedBuildSha = function () {
+      var b = cfg.buildSha;
+      if (typeof b === "function") return b() || "";
+      return b || "";
+    };
+
+    var capturedDataUrl = null;
+    var modalId = cfg.idPrefix + "-modal";
+    var btnId = cfg.idPrefix + "-button";
+    var toastId = cfg.idPrefix + "-toast";
+
+    function showToast(message) {
+      removeById(deps.document, toastId);
+      var t = buildToast(deps.document, cfg, message);
+      deps.document.body.appendChild(t);
+      deps.window && deps.window.setTimeout && deps.window.setTimeout(function () {
+        removeById(deps.document, toastId);
+      }, 3500);
+    }
+
+    function closeModal() {
+      capturedDataUrl = null;
+      removeById(deps.document, modalId);
+    }
+
+    function openModal() {
+      if (deps.document.getElementById(modalId)) return;  // re-entry guard
+
+      var overlay = buildModal(deps.document, cfg, {
+        onCancel: closeModal,
+        onSubmit: function (description, showError) {
+          if (!description || !description.trim()) {
+            showError("Please describe what happened.");
+            return;
+          }
+          showError(null);
+          var body = buildPostBody({
+            details: description.trim(),
+            screenshot: capturedDataUrl,
+            metaUrl: (deps.window && deps.window.location && deps.window.location.href) || "",
+            metaUserAgent: (deps.window && deps.window.navigator && deps.window.navigator.userAgent) || "",
+            metaBuildSha: resolvedBuildSha(),
+            tags: ["bug"],
+            addedBy: "web",
+          });
+          deps.fetch(cfg.endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }).then(function (resp) {
+            if (!resp || !resp.ok) {
+              return resp.json().catch(function () { return {}; }).then(function (data) {
+                var msg = (data && (data.error && (data.error.message || data.error))) ||
+                          ("Could not submit (HTTP " + (resp && resp.status) + ")");
+                showError(String(msg));
+              });
+            }
+            closeModal();
+            showToast("Bug report submitted — thank you!");
+          }).catch(function (e) {
+            showError("Network error: " + (e && e.message));
+          });
+        },
+      });
+      deps.document.body.appendChild(overlay);
+
+      var ta = deps.document.getElementById(modalId + "-textarea");
+      if (ta && ta.focus) try { ta.focus(); } catch (_) {}
+
+      // Capture in the background. Modal is excluded via ignoreElements,
+      // so this is safe even though the modal is now visible.
+      var hintEl = deps.document.getElementById(modalId + "-hint");
+      var previewEl = deps.document.getElementById(modalId + "-preview");
+      captureScreenshot(deps, cfg).then(function (dataUrl) {
+        capturedDataUrl = dataUrl;
+        // Modal may have been closed by the user mid-capture; only paint
+        // if it's still in the DOM.
+        if (!deps.document.getElementById(modalId)) return;
+        if (dataUrl) {
+          if (previewEl) { previewEl.src = dataUrl; previewEl.style.display = "block"; }
+          if (hintEl) { hintEl.textContent = "Screenshot captured."; }
+        } else {
+          if (hintEl) { hintEl.textContent = "Screenshot unavailable — you can still submit text."; }
+        }
+      });
+    }
+
+    function ensureButton() {
+      if (!deps.document || !deps.document.body) return null;
+      var existing = deps.document.getElementById(btnId);
+      if (existing) return existing;
+      var btn = buildButton(deps.document, cfg, openModal);
+      deps.document.body.appendChild(btn);
+      return btn;
+    }
+
+    function inject() { ensureButton(); }
+
+    return {
+      inject: inject,
+      openModal: openModal,
+      closeModal: closeModal,
+      _config: cfg,
+      _state: function () {
+        return {
+          buttonMounted: !!deps.document.getElementById(btnId),
+          modalOpen: !!deps.document.getElementById(modalId),
+          capturedDataUrl: capturedDataUrl,
+        };
+      },
+    };
+  }
+
+  function init() {
+    if (typeof window === "undefined" || typeof document === "undefined") return null;
+    var flag = "__bugReportControllerInited";
+    if (window[flag]) return window[flag];
+    var controller = createController({
+      document: document,
+      window: window,
+      fetch: window.fetch.bind(window),
+      html2canvas: window.html2canvas,
+      config: window.BugReportConfig || {},
+    });
+    window[flag] = controller;
+    controller.inject();
+    return controller;
+  }
+
+  return {
+    init: init,
+    createController: createController,
+    buildPostBody: buildPostBody,
+    isBlankCanvas: isBlankCanvas,
+    captureScreenshot: captureScreenshot,
+    DEFAULTS: DEFAULTS,
+  };
+});

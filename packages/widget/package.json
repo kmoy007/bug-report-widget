@@ -1,0 +1,22 @@
+{
+  "name": "bug-report-widget",
+  "version": "1.0.0",
+  "description": "Self-injecting in-app bug-reporting widget with screenshot capture. Backend-agnostic; speaks the bug-report-widget API spec.",
+  "main": "src/bug-report.js",
+  "files": [
+    "src/bug-report.js",
+    "src/html2canvas.min.js",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "keywords": ["bug-report", "feedback", "screenshot", "html2canvas", "widget"],
+  "author": "Ken Moynihan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kmoy007/bug-report-widget.git",
+    "directory": "packages/widget"
+  }
+}

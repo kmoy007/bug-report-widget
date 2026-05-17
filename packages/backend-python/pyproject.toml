@@ -1,0 +1,26 @@
+[project]
+name = "bug-report-py"
+version = "1.0.0"
+description = "Flask blueprint + storage interface implementing the bug-report-widget API spec."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Ken Moynihan" }]
+requires-python = ">=3.10"
+dependencies = [
+    "Flask>=2.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bug_report*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

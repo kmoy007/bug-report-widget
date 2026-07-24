@@ -39,6 +39,10 @@
     idPrefix: "bug-report",
     buildSha: "",
     position: { bottom: 20, right: 20 },
+    // Diameter of the floating button, px. Host apps embedded inside another
+    // shell often want a smaller footprint so it reads as chrome rather than
+    // page content. The glyph scales with it.
+    buttonSize: 52,
     captureTimeoutMs: 6000,
     storageKey: "bug-report-button-position-v2",
     theme: {
@@ -124,6 +128,52 @@
   // or timeout. The timeout is load-bearing — html2canvas has been known
   // to hang on iOS Safari with certain CSS features (filters, blend
   // modes, large viewports). Without it the widget can lock up.
+  // html2canvas does not render iframe CONTENT — an embedded frame comes out as
+  // a blank rectangle, so a screenshot of a page whose main content is framed
+  // shows nothing (reported in the wild as "the screenshot misses the content").
+  // For SAME-ORIGIN frames we can reach the inner document, render it
+  // separately, and paste it into the parent capture at the frame's position.
+  // Cross-origin frames are untouchable by design and stay blank.
+  function compositeIframes(html2canvas, doc, canvas, scale) {
+    var frames;
+    try { frames = Array.prototype.slice.call(doc.querySelectorAll("iframe")); }
+    catch (e) { return Promise.resolve(canvas); }
+    if (!frames.length) return Promise.resolve(canvas);
+
+    var bodyRect = doc.body.getBoundingClientRect();
+    var jobs = frames.map(function (f) {
+      var idoc = null, rect = null;
+      try {
+        // throws (or returns null) for cross-origin — treated as "skip"
+        idoc = f.contentDocument;
+        rect = f.getBoundingClientRect();
+      } catch (e) { return null; }
+      if (!idoc || !idoc.body || !rect || rect.width < 1 || rect.height < 1) return null;
+      if (f.getAttribute && f.getAttribute("data-bug-report-exclude") != null) return null;
+      return { el: f, doc: idoc, rect: rect };
+    }).filter(Boolean);
+    if (!jobs.length) return Promise.resolve(canvas);
+
+    var ctx = canvas.getContext && canvas.getContext("2d");
+    if (!ctx) return Promise.resolve(canvas);
+
+    return Promise.all(jobs.map(function (j) {
+      return html2canvas(j.doc.body, {
+        useCORS: true, logging: false, scale: scale,
+        backgroundColor: null,
+        width: Math.ceil(j.rect.width), height: Math.ceil(j.rect.height),
+        windowWidth: Math.ceil(j.rect.width), windowHeight: Math.ceil(j.rect.height),
+      }).then(function (sub) {
+        try {
+          // position of the frame within the captured body, in canvas pixels
+          var x = (j.rect.left - bodyRect.left) * scale;
+          var y = (j.rect.top - bodyRect.top) * scale;
+          ctx.drawImage(sub, x, y, j.rect.width * scale, j.rect.height * scale);
+        } catch (e) { /* one bad frame must not lose the whole screenshot */ }
+      }).catch(function () { /* same */ });
+    })).then(function () { return canvas; });
+  }
+
   function captureScreenshot(deps, cfg) {
     var html2canvas = deps.html2canvas;
     var doc = deps.document;
@@ -135,12 +185,13 @@
       if (!html2canvas || !doc) { settle(null); return; }
       var btnId = cfg.idPrefix + "-button";
       var modalId = cfg.idPrefix + "-modal";
+      var scale = Math.min((typeof window !== "undefined" && window.devicePixelRatio) || 1, 2);
 
       try {
         html2canvas(doc.body, {
           useCORS: true,
           logging: false,
-          scale: Math.min((typeof window !== "undefined" && window.devicePixelRatio) || 1, 2),
+          scale: scale,
           // Exclude the widget itself — both the floating button and the
           // modal — so neither contributes pixels to its own screenshot.
           // Also honor an opt-out attribute consumers can mark on their
@@ -152,10 +203,13 @@
             return false;
           },
         }).then(function (canvas) {
-          try {
-            if (isBlankCanvas(canvas)) { settle(null); return; }
-            settle(canvas.toDataURL("image/png"));
-          } catch (e) { settle(null); }
+          // paste any same-origin iframe content in before serialising
+          return compositeIframes(html2canvas, doc, canvas, scale).then(function (merged) {
+            try {
+              if (isBlankCanvas(merged)) { settle(null); return; }
+              settle(merged.toDataURL("image/png"));
+            } catch (e) { settle(null); }
+          });
         }).catch(function () { settle(null); });
       } catch (e) { settle(null); }
     });
@@ -176,19 +230,20 @@
     btn.setAttribute("aria-label", "Report a bug");
     btn.setAttribute("data-bug-report-exclude", "true");
     btn.textContent = "🐛";
+    var size = Math.max(24, Math.min(96, Number(cfg.buttonSize) || 52));
     btn.style.cssText = styleStr({
       position: "fixed",
       bottom: "calc(env(safe-area-inset-bottom, 0px) + " + cfg.position.bottom + "px)",
       right: "calc(env(safe-area-inset-right, 0px) + " + cfg.position.right + "px)",
       "z-index": "99998",
-      width: "52px",
-      height: "52px",
+      width: size + "px",
+      height: size + "px",
       "border-radius": "50%",
       border: "0",
       background: cfg.theme.buttonBg,
       color: cfg.theme.buttonInk,
       "box-shadow": "0 6px 18px rgba(0,0,0,0.22), 0 0 0 0.5px rgba(0,0,0,0.08)",
-      "font-size": "24px",
+      "font-size": Math.round(size * 0.46) + "px",
       "line-height": "1",
       "font-family": cfg.theme.font,
       cursor: "grab",

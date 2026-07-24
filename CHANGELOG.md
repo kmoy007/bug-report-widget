@@ -2,6 +2,20 @@
 
 All notable changes to this monorepo.
 
+## v1.1.0 — 2026-07-24
+
+- **Screenshot: same-origin iframe content is now captured.** html2canvas renders an
+  `<iframe>` as a blank rectangle, so any page whose main content is framed screenshotted
+  as an empty white box — reported in the field as "the screenshot misses the content".
+  `captureScreenshot` now re-renders each same-origin frame and composites it into the
+  parent capture at the frame's position. Cross-origin frames are unreachable by design
+  and still come out blank; a frame that fails to render no longer loses the whole
+  screenshot, and `data-bug-report-exclude` is honoured on frames.
+- **`buttonSize` config (default 52).** Diameter of the floating button in px, clamped to
+  24–96; the glyph scales with it. Lets an app embedded inside another shell use a smaller
+  button so it reads as chrome rather than page content. Existing consumers are unaffected.
+- 21 unit tests (+4: compositing, cross-origin skip, failing-frame resilience, config).
+
 ## v1.0.1 — 2026-05-17
 
 - **No code changes.** Adds this CHANGELOG. Used as the first Dependabot smoke-test target — pushing v1.0.1 verifies that `claude-tmux-dashboard`'s Dependabot config opens a PR bumping the git-tag pin in its `requirements.txt`.

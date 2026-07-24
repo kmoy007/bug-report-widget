@@ -134,3 +134,87 @@ test("captureScreenshot: returns null on hang via timeout", async () => {
   assert.equal(result, null);
   assert.ok(elapsed >= 50 && elapsed < 500, `timeout fired too slowly: ${elapsed}ms`);
 });
+
+// --- same-origin iframe compositing -------------------------------------
+// html2canvas renders an <iframe> as a blank rectangle, so a page whose main
+// content is framed screenshots as empty. captureScreenshot now re-renders
+// same-origin frames and pastes them into the parent capture.
+
+function fakeCanvas(drawn) {
+  return {
+    width: 200, height: 100,
+    getContext: () => ({
+      drawImage: (...a) => drawn.push(a),
+      // isBlankCanvas probes pixels — report one opaque non-white pixel so the
+      // capture is treated as real content
+      getImageData: () => ({ data: new Uint8ClampedArray([10, 20, 30, 255]) }),
+    }),
+    toDataURL: () => "data:image/png;base64,MERGED",
+  };
+}
+
+function fakeIframe(rect, innerDoc, attrs = {}) {
+  return {
+    contentDocument: innerDoc,
+    getBoundingClientRect: () => rect,
+    getAttribute: (k) => (k in attrs ? attrs[k] : null),
+  };
+}
+
+test("captureScreenshot: composites a same-origin iframe into the capture", async () => {
+  const drawn = [];
+  const inner = { body: { tag: "inner-body" } };
+  const doc = {
+    body: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
+    querySelectorAll: () => [fakeIframe({ left: 10, top: 20, width: 80, height: 40 }, inner)],
+  };
+  const seen = [];
+  const fake = {
+    html2canvas: (el, opts) => { seen.push(el); return Promise.resolve(fakeCanvas(drawn)); },
+    document: doc,
+  };
+  const out = await widget.captureScreenshot(fake, { ...widget.DEFAULTS, captureTimeoutMs: 2000 });
+  assert.equal(out, "data:image/png;base64,MERGED");
+  assert.ok(seen.includes(inner.body), "inner iframe body was never rendered");
+  assert.equal(drawn.length, 1, "iframe canvas was not pasted into the parent");
+});
+
+test("captureScreenshot: cross-origin iframe is skipped, capture still returned", async () => {
+  const drawn = [];
+  const hostile = {
+    get contentDocument() { throw new Error("cross-origin"); },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 50, height: 50 }),
+    getAttribute: () => null,
+  };
+  const doc = {
+    body: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
+    querySelectorAll: () => [hostile],
+  };
+  const fake = { html2canvas: () => Promise.resolve(fakeCanvas(drawn)), document: doc };
+  const out = await widget.captureScreenshot(fake, { ...widget.DEFAULTS, captureTimeoutMs: 2000 });
+  assert.equal(out, "data:image/png;base64,MERGED");
+  assert.equal(drawn.length, 0, "cross-origin frame must not be drawn");
+});
+
+test("captureScreenshot: a failing iframe render does not lose the screenshot", async () => {
+  const drawn = [];
+  const inner = { body: { tag: "inner" } };
+  const doc = {
+    body: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
+    querySelectorAll: () => [fakeIframe({ left: 0, top: 0, width: 10, height: 10 }, inner)],
+  };
+  let first = true;
+  const fake = {
+    html2canvas: () => {
+      if (first) { first = false; return Promise.resolve(fakeCanvas(drawn)); }
+      return Promise.reject(new Error("inner boom"));   // the iframe render fails
+    },
+    document: doc,
+  };
+  const out = await widget.captureScreenshot(fake, { ...widget.DEFAULTS, captureTimeoutMs: 2000 });
+  assert.equal(out, "data:image/png;base64,MERGED", "parent capture must survive");
+});
+
+test("DEFAULTS exposes a configurable buttonSize", () => {
+  assert.equal(typeof widget.DEFAULTS.buttonSize, "number");
+});

@@ -411,10 +411,34 @@
       if (e.target === overlay) callbacks.onCancel && callbacks.onCancel();
     });
     cancel.addEventListener("click", function () { callbacks.onCancel && callbacks.onCancel(); });
+    // Double-submit guard. The POST is async and nothing here changed on the
+    // first tap, so on a phone — where the tap target is small and the network
+    // is slow — people tap again. That filed the same report 2-3 times, seconds
+    // apart, roughly doubling the queue for mobile reporters.
+    //
+    // NOTE the asymmetry: onSubmit calls showError(null) on the SUCCESS path to
+    // clear any previous message, immediately before the fetch. So only a
+    // TRUTHY msg may restore the button — re-enabling on every showError call
+    // would undo the guard at the exact moment it's needed.
+    var submitting = false;
+    function resetSubmit() {
+      submitting = false;
+      submit.disabled = false;
+      submit.style.opacity = "";
+      submit.style.cursor = "pointer";
+      submit.textContent = "Submit";
+    }
     submit.addEventListener("click", function () {
+      if (submitting) return;
+      submitting = true;
+      submit.disabled = true;
+      submit.style.opacity = "0.6";
+      submit.style.cursor = "default";
+      submit.textContent = "Submitting\u2026";
       callbacks.onSubmit && callbacks.onSubmit(textarea.value, function showError(msg) {
         error.textContent = msg || "";
         error.style.display = msg ? "block" : "none";
+        if (msg) resetSubmit();   // a real failure — let them try again
       });
     });
     return overlay;

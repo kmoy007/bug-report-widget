@@ -2,6 +2,21 @@
 
 All notable changes to this monorepo.
 
+## v1.2.0 — 2026-07-27
+
+- **Double-submit guard on the Submit button.** The click handler called `onSubmit`
+  with no guard: the POST is async and nothing on screen changed on the first tap, so
+  on a phone — small target, slow network — people tapped again. Real reports arrived
+  2–3 times seconds apart (2026-07-01 ×3, 2026-07-23 ×2, 2026-07-27 ×2), roughly
+  doubling the queue for mobile reporters and burying real signal under duplicates.
+  The button now disables and reads "Submitting…" on the first tap.
+
+  It re-enables on a *real* failure — validation, HTTP error, network error — so a
+  failed report is still filable. Note the asymmetry that made this subtle:
+  `onSubmit` calls `showError(null)` on the SUCCESS path to clear stale messages,
+  immediately before the fetch, so only a truthy message may restore the button.
+  Re-enabling on every `showError` call would undo the guard exactly when it matters.
+
 ## v1.1.0 — 2026-07-24
 
 - **Screenshot: same-origin iframe content is now captured.** html2canvas renders an

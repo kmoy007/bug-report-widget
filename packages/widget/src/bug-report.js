@@ -44,6 +44,12 @@
     // page content. The glyph scales with it.
     buttonSize: 52,
     captureTimeoutMs: 6000,
+    // Decoded-byte ceiling for the screenshot payload. Mirrors the reference
+    // backend's server-side cap (which stays authoritative — never trust the
+    // client). The client cap exists so a capture that would be rejected is
+    // re-encoded smaller (or dropped) instead of dead-ending the report in a
+    // 413 the user can't do anything about.
+    maxScreenshotBytes: 5 * 1024 * 1024,
     storageKey: "bug-report-button-position-v2",
     theme: {
       accent: "#007AFF",
@@ -109,6 +115,63 @@
     }
   }
 
+  // Decoded byte size of a data URL's base64 payload — i.e. what a server
+  // that base64-decodes before checking its cap will measure.
+  function dataUrlBytes(dataUrl) {
+    if (typeof dataUrl !== "string") return 0;
+    var i = dataUrl.indexOf(",");
+    var b64 = i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
+    var pad = 0;
+    if (b64.slice(-2) === "==") pad = 2;
+    else if (b64.slice(-1) === "=") pad = 1;
+    return Math.max(0, Math.floor((b64.length * 3) / 4) - pad);
+  }
+
+  // Serialise a canvas to a data URL whose DECODED size is ≤ maxBytes.
+  // Ladder: PNG (lossless) → JPEG 0.85 → JPEG 0.6 → half-resolution JPEG
+  // 0.6 → null. A null means the report goes out without a screenshot,
+  // which beats a 413 the user can't recover from.
+  //
+  // JPEG has no alpha channel and browsers composite transparent pixels
+  // onto BLACK, so the canvas is flattened onto white before any JPEG
+  // encode. If flattening fails (no createElement / getContext in exotic
+  // hosts) the unflattened canvas is used — a dark screenshot still beats
+  // no screenshot.
+  function encodeCanvasUnderCap(canvas, maxBytes, doc) {
+    function fits(url) { return url && dataUrlBytes(url) <= maxBytes ? url : null; }
+    try {
+      var png = fits(canvas.toDataURL("image/png"));
+      if (png) return png;
+    } catch (e) { return null; }
+    var flat = canvas;
+    try {
+      var f = doc.createElement("canvas");
+      f.width = canvas.width; f.height = canvas.height;
+      var fctx = f.getContext("2d");
+      fctx.fillStyle = "#ffffff";
+      fctx.fillRect(0, 0, f.width, f.height);
+      fctx.drawImage(canvas, 0, 0);
+      flat = f;
+    } catch (e) { /* fall through with the unflattened canvas */ }
+    var qualities = [0.85, 0.6];
+    for (var i = 0; i < qualities.length; i++) {
+      try {
+        var jpg = fits(flat.toDataURL("image/jpeg", qualities[i]));
+        if (jpg) return jpg;
+      } catch (e) { return null; }
+    }
+    try {
+      var h = doc.createElement("canvas");
+      h.width = Math.max(1, Math.round(flat.width / 2));
+      h.height = Math.max(1, Math.round(flat.height / 2));
+      var hctx = h.getContext("2d");
+      hctx.fillStyle = "#ffffff";
+      hctx.fillRect(0, 0, h.width, h.height);
+      hctx.drawImage(flat, 0, 0, h.width, h.height);
+      return fits(h.toDataURL("image/jpeg", 0.6));
+    } catch (e) { return null; }
+  }
+
   function buildPostBody(opts) {
     return {
       title: opts.title || (opts.details || "").split("\n")[0].slice(0, 100),
@@ -134,13 +197,16 @@
   // For SAME-ORIGIN frames we can reach the inner document, render it
   // separately, and paste it into the parent capture at the frame's position.
   // Cross-origin frames are untouchable by design and stay blank.
-  function compositeIframes(html2canvas, doc, canvas, scale) {
+  // `origin` is the top-left of the captured region in VIEWPORT coordinates
+  // — {left: 0, top: 0} for a viewport-cropped capture, doc.body's rect for
+  // a full-body capture — so frame rects (which getBoundingClientRect always
+  // reports viewport-relative) land at the right canvas position either way.
+  function compositeIframes(html2canvas, doc, canvas, scale, origin) {
     var frames;
     try { frames = Array.prototype.slice.call(doc.querySelectorAll("iframe")); }
     catch (e) { return Promise.resolve(canvas); }
     if (!frames.length) return Promise.resolve(canvas);
 
-    var bodyRect = doc.body.getBoundingClientRect();
     var jobs = frames.map(function (f) {
       var idoc = null, rect = null;
       try {
@@ -165,9 +231,9 @@
         windowWidth: Math.ceil(j.rect.width), windowHeight: Math.ceil(j.rect.height),
       }).then(function (sub) {
         try {
-          // position of the frame within the captured body, in canvas pixels
-          var x = (j.rect.left - bodyRect.left) * scale;
-          var y = (j.rect.top - bodyRect.top) * scale;
+          // position of the frame within the captured region, in canvas pixels
+          var x = (j.rect.left - origin.left) * scale;
+          var y = (j.rect.top - origin.top) * scale;
           ctx.drawImage(sub, x, y, j.rect.width * scale, j.rect.height * scale);
         } catch (e) { /* one bad frame must not lose the whole screenshot */ }
       }).catch(function () { /* same */ });
@@ -185,29 +251,58 @@
       if (!html2canvas || !doc) { settle(null); return; }
       var btnId = cfg.idPrefix + "-button";
       var modalId = cfg.idPrefix + "-modal";
-      var scale = Math.min((typeof window !== "undefined" && window.devicePixelRatio) || 1, 2);
+      var win = deps.window || (typeof window !== "undefined" ? window : null);
+      var scale = Math.min((win && win.devicePixelRatio) || 1, 2);
+
+      // Capture the VIEWPORT, not the whole document. Rendering doc.body
+      // uncropped scales with scroll height: a long list page produced a
+      // viewport-wide × full-scroll-height PNG that blew past the server's
+      // size cap (413, report dead-ended) and previewed as a sliver. What
+      // the user sees when they hit the button is the bug context anyway.
+      // Falls back to the uncropped capture when viewport geometry is
+      // unavailable (headless hosts, exotic embeds).
+      var viewW = (doc.documentElement && doc.documentElement.clientWidth) || (win && win.innerWidth) || 0;
+      var viewH = (doc.documentElement && doc.documentElement.clientHeight) || (win && win.innerHeight) || 0;
+      var scrollX = (win && (win.scrollX != null ? win.scrollX : win.pageXOffset)) || 0;
+      var scrollY = (win && (win.scrollY != null ? win.scrollY : win.pageYOffset)) || 0;
+      var cropped = viewW > 0 && viewH > 0;
+
+      var opts = {
+        useCORS: true,
+        logging: false,
+        scale: scale,
+        // Exclude the widget itself — both the floating button and the
+        // modal — so neither contributes pixels to its own screenshot.
+        // Also honor an opt-out attribute consumers can mark on their
+        // own elements (e.g. a password field, a sensitive widget).
+        ignoreElements: function (el) {
+          if (!el) return false;
+          if (el.id === btnId || el.id === modalId) return true;
+          if (el.getAttribute && el.getAttribute("data-bug-report-exclude") != null) return true;
+          return false;
+        },
+      };
+      if (cropped) {
+        opts.x = scrollX;
+        opts.y = scrollY;
+        opts.width = viewW;
+        opts.height = viewH;
+        opts.windowWidth = viewW;
+        opts.windowHeight = viewH;
+      }
 
       try {
-        html2canvas(doc.body, {
-          useCORS: true,
-          logging: false,
-          scale: scale,
-          // Exclude the widget itself — both the floating button and the
-          // modal — so neither contributes pixels to its own screenshot.
-          // Also honor an opt-out attribute consumers can mark on their
-          // own elements (e.g. a password field, a sensitive widget).
-          ignoreElements: function (el) {
-            if (!el) return false;
-            if (el.id === btnId || el.id === modalId) return true;
-            if (el.getAttribute && el.getAttribute("data-bug-report-exclude") != null) return true;
-            return false;
-          },
-        }).then(function (canvas) {
+        html2canvas(doc.body, opts).then(function (canvas) {
+          // Frame rects are viewport-relative; so is the canvas when
+          // cropped. Uncropped, positions are body-relative.
+          var origin = cropped
+            ? { left: 0, top: 0 }
+            : doc.body.getBoundingClientRect();
           // paste any same-origin iframe content in before serialising
-          return compositeIframes(html2canvas, doc, canvas, scale).then(function (merged) {
+          return compositeIframes(html2canvas, doc, canvas, scale, origin).then(function (merged) {
             try {
               if (isBlankCanvas(merged)) { settle(null); return; }
-              settle(merged.toDataURL("image/png"));
+              settle(encodeCanvasUnderCap(merged, cfg.maxScreenshotBytes || DEFAULTS.maxScreenshotBytes, doc));
             } catch (e) { settle(null); }
           });
         }).catch(function () { settle(null); });
@@ -617,6 +712,8 @@
     buildPostBody: buildPostBody,
     isBlankCanvas: isBlankCanvas,
     captureScreenshot: captureScreenshot,
+    dataUrlBytes: dataUrlBytes,
+    encodeCanvasUnderCap: encodeCanvasUnderCap,
     DEFAULTS: DEFAULTS,
   };
 });

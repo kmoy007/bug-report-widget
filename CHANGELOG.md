@@ -2,6 +2,29 @@
 
 All notable changes to this monorepo.
 
+## v1.3.0 — 2026-08-17
+
+- **Screenshot capture is cropped to the viewport.** `captureScreenshot` rendered the
+  whole `doc.body`, so the canvas scaled with scroll height: a long list page produced
+  a viewport-wide × full-scroll-height PNG that (a) blew past the reference backend's
+  5 MB decoded cap — the POST 413'd and the report dead-ended with no way forward —
+  and (b) previewed in the modal as an unreadable vertical sliver. Capture now crops
+  to the visible viewport at the current scroll offset (what the user was looking at
+  when they hit the button, which is the bug context anyway). Falls back to the old
+  uncropped capture when viewport geometry is unavailable. Iframe compositing
+  positions were re-based accordingly (frame rects are viewport-relative, so under
+  the crop they map to the canvas directly instead of via `bodyRect`).
+- **Size-capped serialisation with a fallback ladder.** New `maxScreenshotBytes`
+  config (default 5 MB decoded, mirroring the reference backend cap — the server
+  stays authoritative). Serialisation walks PNG → JPEG 0.85 → JPEG 0.6 →
+  half-resolution JPEG 0.6 and returns the first rung under the cap; if none fit,
+  the report is submitted without a screenshot instead of dead-ending in a 413.
+  JPEG rungs flatten onto white first (browsers composite alpha onto black).
+  New exported helpers: `dataUrlBytes`, `encodeCanvasUnderCap`.
+- 37 unit tests (+12: byte accounting, every ladder rung, white-flatten, viewport
+  crop options, scroll-offset crop, iframe paste position under crop, oversized
+  capture degrading to JPEG).
+
 ## v1.2.0 — 2026-07-27
 
 - **Double-submit guard on the Submit button.** The click handler called `onSubmit`

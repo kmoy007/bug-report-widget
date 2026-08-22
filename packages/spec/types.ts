@@ -23,7 +23,7 @@ export interface BugCreate {
   metaUrl?: string;
   metaUserAgent?: string;
   metaBuildSha?: string;
-  /** data: URL or raw base64 PNG. ≤ 5 MB decoded. */
+  /** data: URL or raw base64 image (PNG or JPEG). ≤ 5 MB decoded. */
   screenshot?: string;
   transcript?: TranscriptTurn[];
 }

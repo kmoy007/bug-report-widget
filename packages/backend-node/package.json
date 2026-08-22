@@ -1,6 +1,6 @@
 {
   "name": "bug-report-node",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Express router + storage interface implementing the bug-report-widget API spec.",
   "main": "src/index.js",
   "type": "module",

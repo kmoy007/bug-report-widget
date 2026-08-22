@@ -16,6 +16,7 @@ import {
   BUG_STATUSES,
   newBugId,
   nowIso,
+  screenshotContentType,
   sinceIso,
   validBugId,
 } from "./models.js";
@@ -192,8 +193,8 @@ export function createBugsRouter(opts = {}) {
   router.get("/:id/screenshot", async (req, res) => {
     if (!validBugId(req.params.id)) return res.sendStatus(400);
     try {
-      const png = await store.getScreenshot(req.params.id);
-      res.type("image/png").send(png);
+      const shot = await store.getScreenshot(req.params.id);
+      res.type(screenshotContentType(shot)).send(shot);
     } catch (e) {
       if (e instanceof NotFound) return res.sendStatus(404);
       throw e;

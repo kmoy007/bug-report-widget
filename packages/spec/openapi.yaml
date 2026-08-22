@@ -145,9 +145,28 @@ paths:
       operationId: getBugScreenshot
       responses:
         "200":
-          description: PNG bytes (or 302 to a signed URL — server's choice)
+          description: |
+            The stored screenshot's bytes (or 302 to a signed URL — server's
+            choice). The media type describes what was actually stored, sniffed
+            from the bytes: the widget serialises PNG when it fits under the
+            size cap and falls back to JPEG when it does not, so a client must
+            not assume PNG. Bytes in no recognised image format are served as
+            image/png, which is what every server did before this was
+            specified.
           content:
             image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            image/gif:
               schema:
                 type: string
                 format: binary

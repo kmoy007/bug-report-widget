@@ -17,6 +17,7 @@ from .models import (
     BUG_SCREENSHOT_MAX,
     BUG_STATUSES,
     new_bug_id,
+    screenshot_content_type,
     valid_bug_id,
 )
 from .store import (
@@ -239,6 +240,6 @@ def create_blueprint(
             data = store.get_screenshot(bug_id)
         except NotFound:
             abort(404)
-        return send_file(io.BytesIO(data), mimetype="image/png")
+        return send_file(io.BytesIO(data), mimetype=screenshot_content_type(data))
 
     return bp

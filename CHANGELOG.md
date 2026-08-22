@@ -2,6 +2,39 @@
 
 All notable changes to this monorepo.
 
+## backends v1.1.0 — 2026-08-21
+
+- **Screenshots are served with the media type they actually are.** Both reference
+  backends hard-coded `image/png` on `GET /bugs/{id}/screenshot`. That was already
+  a lie for anything that fell down the widget's v1.3.0 fallback ladder — and on an
+  image-heavy page that ladder is the ordinary path, not the exotic one: a real
+  deployment (a placement-image viewer, 39 photographic tiles) produces a
+  viewport-cropped capture whose PNG still exceeds the 5 MB cap, so what it stores
+  is a 1.4 MB JPEG, served as `image/png`. Consumers that send
+  `X-Content-Type-Options: nosniff` — the right header for a service that serves
+  user-uploaded bytes back — were relying on browsers being lenient about image
+  types to render their own triage queue.
+
+  The type is now sniffed from the stored bytes (`screenshot_content_type` /
+  `screenshotContentType`, new in the model layer of each backend): PNG, JPEG, GIF
+  and WebP are recognised. **Sniffed, not stored** — deliberately, because the bytes
+  are the only thing every `Store` implementation is guaranteed to have kept, so
+  existing screenshots in existing stores are labelled correctly too, with no
+  migration and no schema change. Bytes in no recognised format keep `image/png`,
+  which is what every server returned before this, so nothing that rendered stops
+  rendering.
+
+  The data: URL's declared type is *not* trusted: it is the client's claim about
+  bytes the server is about to store, and a mislabelled upload must not become a
+  mislabelled download.
+
+- Spec: the `200` on `GET /bugs/{id}/screenshot` now enumerates the image types a
+  server may return instead of promising PNG, and `types.ts` no longer describes the
+  `screenshot` field as PNG.
+- +14 backend unit tests (7 per stack: every recognised format, the RIFF-but-not-WebP
+  case, truncated magic, empty, junk) and +2 cross-stack contract scenarios, so the
+  two implementations are held to the same sniffing behaviour.
+
 ## v1.3.0 — 2026-08-17
 
 - **Screenshot capture is cropped to the viewport.** `captureScreenshot` rendered the

@@ -8,6 +8,37 @@ export const BUG_SCREENSHOT_MAX = 5 * 1024 * 1024;  // 5 MB decoded
 
 export const BUG_STATUSES = ["open", "triaged", "resolved", "declined"];
 
+// The widget serialises PNG when it fits and falls back down a JPEG ladder when
+// the capture would otherwise blow the cap above — so "the screenshot" is not
+// always a PNG, and on an image-heavy page it usually is not. Serving every one
+// of them as image/png mislabels the common case; a consumer that sends
+// `X-Content-Type-Options: nosniff` is then relying on browsers being lenient
+// about image types to render its own triage queue.
+//
+// Sniffed rather than stored, deliberately: the bytes are the only thing every
+// Store implementation is guaranteed to have kept, so this also fixes the
+// screenshots already sitting in existing stores. Unrecognised bytes keep the
+// historical image/png, which is what every deployment before this returned.
+const MAGIC = [
+  [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "image/png"],
+  [[0xff, 0xd8, 0xff], "image/jpeg"],
+  [[0x47, 0x49, 0x46, 0x38, 0x37, 0x61], "image/gif"],   // GIF87a
+  [[0x47, 0x49, 0x46, 0x38, 0x39, 0x61], "image/gif"],   // GIF89a
+];
+
+/** The media type of a stored screenshot, from its magic bytes. */
+export function screenshotContentType(data) {
+  if (!data || !data.length) return "image/png";
+  const b = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  for (const [magic, mime] of MAGIC) {
+    if (b.length >= magic.length && magic.every((byte, i) => b[i] === byte)) return mime;
+  }
+  // WebP is RIFF-framed: "RIFF" <4-byte size> "WEBP".
+  if (b.length >= 12 && b.toString("latin1", 0, 4) === "RIFF" &&
+      b.toString("latin1", 8, 12) === "WEBP") return "image/webp";
+  return "image/png";
+}
+
 const BUG_ID_RE = /^bug-\d{8}-\d{6}-[a-f0-9]{6}$/;
 
 export function validBugId(id) {

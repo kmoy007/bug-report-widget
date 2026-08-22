@@ -29,6 +29,8 @@ pytest -v
 - PATCH transitions write audit; same-status PATCH is a no-op
 - PATCH invalid status → 400
 - POST with screenshot → can retrieve PNG bytes intact
+- a JPEG screenshot comes back labelled `image/jpeg`, not `image/png`
+- the served media type is sniffed from the stored bytes, not taken from the data: URL
 - Screenshot 404 when missing
 
 If a test passes against Python but fails against Node (or vice versa), that's exactly the kind of drift these tests exist to catch. Fix the loser, don't loosen the test.

@@ -19,6 +19,8 @@ TINY_PNG = bytes.fromhex(
     "49444154789C6300010000000500010D0A2DB40000000049454E44AE426082"
 )
 TINY_PNG_B64 = base64.b64encode(TINY_PNG).decode()
+TINY_JPEG = bytes.fromhex("FFD8FFE000104A46494600010100000100010000FFD9")
+TINY_JPEG_B64 = base64.b64encode(TINY_JPEG).decode()
 ID_RE = re.compile(r"^bug-\d{8}-\d{6}-[a-f0-9]{6}$")
 
 
@@ -142,6 +144,35 @@ def test_screenshot_roundtrip(backend_url):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("image/png")
     assert r.content == TINY_PNG
+
+
+def test_jpeg_screenshot_keeps_its_own_content_type(backend_url):
+    """Both stacks must label a JPEG as a JPEG.
+
+    The widget emits JPEG whenever a PNG capture would exceed the 5 MB cap,
+    so this is the ordinary path for an image-heavy page — and a consumer
+    sending `X-Content-Type-Options: nosniff` should not have to rely on
+    browser leniency to render its own triage queue.
+    """
+    bid = requests.post(backend_url, json={
+        "details": "jpeg shot",
+        "screenshot": f"data:image/jpeg;base64,{TINY_JPEG_B64}",
+    }).json()["id"]
+    r = requests.get(f"{backend_url}/{bid}/screenshot")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/jpeg")
+    assert r.content == TINY_JPEG
+
+
+def test_screenshot_type_is_sniffed_not_trusted(backend_url):
+    """The data: URL's declared type is the client's claim about the bytes.
+    Both stacks must describe what they actually stored."""
+    bid = requests.post(backend_url, json={
+        "details": "lying data url",
+        "screenshot": f"data:image/png;base64,{TINY_JPEG_B64}",
+    }).json()["id"]
+    r = requests.get(f"{backend_url}/{bid}/screenshot")
+    assert r.headers["content-type"].startswith("image/jpeg")
 
 
 def test_screenshot_404_when_missing(backend_url):

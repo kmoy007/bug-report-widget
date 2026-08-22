@@ -27,6 +27,12 @@ TINY_PNG = bytes.fromhex(
 )
 TINY_PNG_B64 = base64.b64encode(TINY_PNG).decode()
 
+# Smallest thing that sniffs as a JPEG: SOI + APP0. The widget emits these
+# whenever a PNG capture would exceed the size cap, which on an image-heavy
+# page is the normal path, not the exotic one.
+TINY_JPEG = bytes.fromhex("FFD8FFE000104A46494600010100000100010000FFD9")
+TINY_JPEG_B64 = base64.b64encode(TINY_JPEG).decode()
+
 
 @pytest.fixture(params=["memory", "filesystem"])
 def store(request, tmp_path):
@@ -116,6 +122,36 @@ def test_post_with_screenshot_persists_bytes(client):
     assert shot.status_code == 200
     assert shot.mimetype == "image/png"
     assert shot.data == TINY_PNG
+
+
+def test_jpeg_screenshot_is_served_as_jpeg(client):
+    """A JPEG must not come back labelled image/png.
+
+    The widget's fallback ladder emits JPEG whenever the PNG would exceed
+    BUG_SCREENSHOT_MAX, so this is the ORDINARY case for any page with
+    photographs on it. Serving it as image/png leaves a consumer that sends
+    `X-Content-Type-Options: nosniff` depending on browser leniency to render
+    its own triage queue.
+    """
+    bid = client.post("/bugs", json={
+        "details": "jpeg shot",
+        "screenshot": f"data:image/jpeg;base64,{TINY_JPEG_B64}",
+    }).get_json()["id"]
+    shot = client.get(f"/bugs/{bid}/screenshot")
+    assert shot.status_code == 200
+    assert shot.mimetype == "image/jpeg"
+    assert shot.data == TINY_JPEG
+
+
+def test_screenshot_type_is_sniffed_not_taken_from_the_data_url(client):
+    """The data: URL's declared type is the CLIENT's claim about bytes we are
+    about to store. The response type must describe what was actually stored,
+    or a mislabelled upload becomes a mislabelled download."""
+    bid = client.post("/bugs", json={
+        "details": "lying data url",
+        "screenshot": f"data:image/png;base64,{TINY_JPEG_B64}",   # says PNG, is JPEG
+    }).get_json()["id"]
+    assert client.get(f"/bugs/{bid}/screenshot").mimetype == "image/jpeg"
 
 
 # ---------------------------------------------------------------------------

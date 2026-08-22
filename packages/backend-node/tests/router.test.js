@@ -19,6 +19,12 @@ const TINY_PNG = Buffer.from(
 );
 const TINY_PNG_B64 = TINY_PNG.toString("base64");
 
+// Smallest thing that sniffs as a JPEG: SOI + APP0. The widget emits these
+// whenever a PNG capture would exceed the size cap, which on an image-heavy
+// page is the normal path, not the exotic one.
+const TINY_JPEG = Buffer.from("FFD8FFE000104A46494600010100000100010000FFD9", "hex");
+const TINY_JPEG_B64 = TINY_JPEG.toString("base64");
+
 const STORES = [
   ["memory", () => ({ store: new InMemoryStore(), cleanup: () => {} })],
   ["filesystem", () => {
@@ -235,6 +241,37 @@ for (const [name, makeStore] of STORES) {
       assert.equal(r.headers.get("content-type")?.split(";")[0], "image/png");
       const bytes = Buffer.from(await r.arrayBuffer());
       assert.deepEqual(bytes, TINY_PNG);
+    });
+  });
+
+  test(`[${name}] a JPEG screenshot is served as JPEG, not PNG`, async () => {
+    // The widget's fallback ladder emits JPEG whenever the PNG would exceed
+    // BUG_SCREENSHOT_MAX — the ordinary case for any page with photographs on
+    // it. Serving it as image/png leaves a consumer that sends
+    // `X-Content-Type-Options: nosniff` depending on browser leniency to
+    // render its own triage queue.
+    await withApp(makeStore, null, async ({ server }) => {
+      const id = (await (await fetch(url(server, "/bugs"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ details: "jpeg shot", screenshot: `data:image/jpeg;base64,${TINY_JPEG_B64}` }),
+      })).json()).id;
+      const r = await fetch(url(server, `/bugs/${id}/screenshot`));
+      assert.equal(r.status, 200);
+      assert.equal(r.headers.get("content-type")?.split(";")[0], "image/jpeg");
+      assert.deepEqual(Buffer.from(await r.arrayBuffer()), TINY_JPEG);
+    });
+  });
+
+  test(`[${name}] the type is sniffed, not taken from the data: URL`, async () => {
+    // The data: URL's declared type is the CLIENT's claim about bytes we are
+    // about to store. The response must describe what was actually stored.
+    await withApp(makeStore, null, async ({ server }) => {
+      const id = (await (await fetch(url(server, "/bugs"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ details: "lying data url", screenshot: `data:image/png;base64,${TINY_JPEG_B64}` }),
+      })).json()).id;
+      const r = await fetch(url(server, `/bugs/${id}/screenshot`));
+      assert.equal(r.headers.get("content-type")?.split(";")[0], "image/jpeg");
     });
   });
 

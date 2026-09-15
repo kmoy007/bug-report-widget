@@ -36,7 +36,9 @@ Set `window.BugReportConfig` **before** the script loads if you want to override
     endpoint: "/api/bugs",
     idPrefix: "bug-report",
     buildSha: window.MY_APP_BUILD_SHA || "",  // or () => string
-    position: { bottom: 20, right: 20 },
+    position: { bottom: 20, right: 20 },  // before the user drags it
+    buttonSize: 52,                         // px diameter
+    title: "Report a bug",                  // modal heading
     theme: {
       accent: "#007AFF",
       buttonBg: "#ffffff",
@@ -47,6 +49,10 @@ Set `window.BugReportConfig` **before** the script loads if you want to override
 <script src="/static/html2canvas.min.js" defer></script>
 <script src="/static/bug-report.js" defer></script>
 ```
+
+The button is draggable; where the user leaves it is remembered in `localStorage`
+(`storageKey`, per origin and per browser) and clamped back inside the viewport on
+load and on every resize, so it can never be restored off-screen.
 
 ## What ships
 

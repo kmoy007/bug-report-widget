@@ -2,6 +2,31 @@
 
 All notable changes to this monorepo.
 
+## v1.4.0 — 2026-09-15
+
+- **A dragged button is restored inside the viewport.** The drag handler clamped the
+  button to the window, but the position restored from `localStorage` at mount was
+  applied exactly as stored. A button dragged towards the bottom-right of a large
+  window therefore came back off-screen in a smaller one — another browser window, a
+  laptop unplugged from its monitor, a phone — and the widget looked permanently
+  missing. The only cure was deleting `bug-report-button-position-v2` by hand, in
+  every browser separately (storage is per-origin *and* per-browser). That is how
+  the fleet dashboard lost its button for its main reporter.
+
+  The stored position is now clamped to the current viewport (4px margin, the same
+  rule the drag handler always used, now one helper: `clampPos`) at mount **and on
+  every `resize`**. Clamping is for display only and never rewrites storage, so a
+  spot chosen on a big window comes back when the window does.
+- **`title` config** — the modal heading, default `"Report a bug"`. Upstreamed from
+  leap-daily-report, which had patched its vendored copy to say "Report a problem";
+  a re-copy of v1.3.0 would have silently reverted it.
+- `npm test` ran `node --test tests/`, which Node 22 treats as a module path and
+  fails with `Cannot find module`; it now globs `tests/*.test.js`.
+- 44 unit tests (+7: restore into a smaller window, restore unchanged when it fits,
+  negative positions, shrink-then-grow on resize with no storage write, no stored
+  position, unknown geometry, the title). Mutation-checked: restoring the unclamped
+  position fails 3 of them.
+
 ## backends v1.1.0 — 2026-08-21
 
 - **Screenshots are served with the media type they actually are.** Both reference

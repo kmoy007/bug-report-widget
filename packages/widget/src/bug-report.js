@@ -43,6 +43,9 @@
     // shell often want a smaller footprint so it reads as chrome rather than
     // page content. The glyph scales with it.
     buttonSize: 52,
+    // Heading of the report modal. An app whose queue takes more than bugs
+    // (feature requests, "the numbers look wrong") can say so.
+    title: "Report a bug",
     captureTimeoutMs: 6000,
     // Decoded-byte ceiling for the screenshot payload. Mirrors the reference
     // backend's server-side cap (which stays authoritative — never trust the
@@ -170,6 +173,21 @@
       hctx.drawImage(flat, 0, 0, h.width, h.height);
       return fits(h.toDataURL("image/jpeg", 0.6));
     } catch (e) { return null; }
+  }
+
+  // Keep a {left, top} button position inside a vw × vh viewport, with a 4px
+  // margin. The drag handler always clamped, but a RESTORED position was
+  // applied as stored — so a button dragged near the right or bottom edge of a
+  // large window came back off-screen on a smaller one (another browser
+  // window, a laptop after an external monitor, a phone), and the widget
+  // looked permanently missing until someone cleared localStorage by hand.
+  // Unknown geometry (a headless host reporting 0) leaves the position alone.
+  function clampPos(pos, vw, vh, w, h) {
+    var MARGIN = 4;
+    var left = pos.left, top = pos.top;
+    if (vw > 0) left = Math.max(MARGIN, Math.min(vw - w - MARGIN, left));
+    if (vh > 0) top = Math.max(MARGIN, Math.min(vh - h - MARGIN, top));
+    return { left: left, top: top };
   }
 
   function buildPostBody(opts) {
@@ -318,7 +336,25 @@
     return parts.join(";");
   }
 
-  function buildButton(doc, cfg, onClick) {
+  function viewportSize(win) {
+    return {
+      w: (win && win.innerWidth) || 0,
+      h: (win && win.innerHeight) || 0,
+    };
+  }
+
+  // Re-apply the stored position, clamped to the viewport as it is NOW. Called
+  // at mount and on every resize; never writes storage, so a position chosen on
+  // a big window comes back when the window does.
+  function placeFromStorage(btn, cfg, win, size) {
+    var pos = loadStoredPos(cfg);
+    if (!pos) return;
+    var vp = viewportSize(win);
+    var p = clampPos(pos, vp.w, vp.h, size, size);
+    applyAbsolutePos(btn, p.left, p.top);
+  }
+
+  function buildButton(doc, cfg, onClick, win) {
     var btn = doc.createElement("button");
     btn.id = cfg.idPrefix + "-button";
     btn.type = "button";
@@ -350,14 +386,14 @@
       "justify-content": "center",
     });
 
-    var pos = loadStoredPos(cfg);
-    if (pos) applyAbsolutePos(btn, pos.left, pos.top);
+    btn._size = size;
+    placeFromStorage(btn, cfg, win, size);
 
     btn.addEventListener("click", function (e) {
       if (btn._suppressClick) { btn._suppressClick = false; e.preventDefault(); e.stopPropagation(); return; }
       onClick();
     });
-    makeDraggable(btn, cfg);
+    makeDraggable(btn, cfg, win);
     return btn;
   }
 
@@ -382,7 +418,7 @@
     try { localStorage.setItem(cfg.storageKey, JSON.stringify({ left: left, top: top })); } catch (e) {}
   }
 
-  function makeDraggable(btn, cfg) {
+  function makeDraggable(btn, cfg, win) {
     var dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0, moved = false;
     btn.addEventListener("pointerdown", function (e) {
       dragging = true;
@@ -397,10 +433,9 @@
       if (!dragging) return;
       var dx = e.clientX - startX, dy = e.clientY - startY;
       if (Math.abs(dx) + Math.abs(dy) > 5) moved = true;
-      var W = btn.offsetWidth, H = btn.offsetHeight;
-      var L = Math.max(4, Math.min(window.innerWidth - W - 4, origLeft + dx));
-      var T = Math.max(4, Math.min(window.innerHeight - H - 4, origTop + dy));
-      applyAbsolutePos(btn, L, T);
+      var vp = viewportSize(win);
+      var p = clampPos({ left: origLeft + dx, top: origTop + dy }, vp.w, vp.h, btn.offsetWidth, btn.offsetHeight);
+      applyAbsolutePos(btn, p.left, p.top);
     });
     function endDrag(e) {
       if (!dragging) return;
@@ -449,7 +484,7 @@
     }
 
     var title = doc.createElement("h2");
-    title.textContent = "Report a bug";
+    title.textContent = cfg.title || DEFAULTS.title;
     title.style.cssText = "font-size:18px;font-weight:600;margin:0 0 6px 0";
     box.appendChild(title);
 
@@ -668,8 +703,16 @@
       if (!deps.document || !deps.document.body) return null;
       var existing = deps.document.getElementById(btnId);
       if (existing) return existing;
-      var btn = buildButton(deps.document, cfg, openModal);
+      var btn = buildButton(deps.document, cfg, openModal, deps.window);
       deps.document.body.appendChild(btn);
+      // A window that shrinks after mount (a resize, a rotation, a docked
+      // devtools pane) would strand a dragged button just as a reload did.
+      if (deps.window && deps.window.addEventListener) {
+        deps.window.addEventListener("resize", function () {
+          var b = deps.document.getElementById(btnId);
+          if (b) placeFromStorage(b, cfg, deps.window, b._size);
+        });
+      }
       return btn;
     }
 
@@ -710,6 +753,7 @@
     init: init,
     createController: createController,
     buildPostBody: buildPostBody,
+    clampPos: clampPos,
     isBlankCanvas: isBlankCanvas,
     captureScreenshot: captureScreenshot,
     dataUrlBytes: dataUrlBytes,

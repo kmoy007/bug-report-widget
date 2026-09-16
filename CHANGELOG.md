@@ -2,6 +2,34 @@
 
 All notable changes to this monorepo.
 
+## backend-python v2.0.0 · triage-ui v1.0.0 · spec — 2026-09-16
+
+**Breaking for `backend-python`, deliberately.** `PATCH /bugs/{id}` used to
+validate only that the new status was a member of the enum, so
+`open → resolved` went through. It is now gated on the lifecycle contract
+and answers **409** for a move the contract does not allow, and **400** for
+a decline with no reason. A same-status PATCH is still the documented
+no-op. Upgrading will turn some previously-accepted requests into refusals
+— which is the point, but it is a behaviour change and gets a major.
+
+- **`packages/spec/report-contract.json` — the lifecycle.** `openapi.yaml`
+  pins the wire *format* and was always quiet about the lifecycle. That
+  silence cost something: every consuming app decided for itself what
+  `PATCH` may do, so the same request was a 409 in one app and a 200 in the
+  next, neither wrong by its own lights, and a queue merged across both was
+  incoherent. The contract settles the transitions a server must accept
+  *exactly*, which of those a UI should offer, where a reason is required,
+  the `kind` vocabulary, and which fields a list row carries versus a
+  detail read. Same rule as the wire format: change it here first.
+- **`packages/triage-ui` — the admin queue, packaged.** Four apps had
+  hand-written this screen, three by porting the first one's HTML. They had
+  drifted: one collapsed two kinds into one, one rendered a field the others
+  didn't, one had no screen at all. Dependency-free, framework-free, themed
+  entirely by CSS custom properties. `kind` is consumed from the server,
+  never re-derived from tags — that re-derivation is the drift it exists to
+  end.
+- **`kind` on every payload the blueprint returns**, derived once from tags.
+
 ## v1.4.0 — 2026-09-15
 
 - **A dragged button is restored inside the viewport.** The drag handler clamped the

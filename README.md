@@ -9,7 +9,8 @@ The design pattern that motivated this lives at [design-patterns/bug-report-patt
 | Package | Language | What it gives you |
 |---|---|---|
 | [`packages/widget`](packages/widget) | Vanilla JS | The floating button + capture + modal. Self-injecting; one `<script>` tag per page. Vendors html2canvas. |
-| [`packages/spec`](packages/spec) | OpenAPI + TS + Python types | The single source of truth for the wire format. Backends honor it; e2e tests enforce it. |
+| [`packages/triage-ui`](packages/triage-ui) | Vanilla JS + CSS | The admin queue: the screen someone works reports through. Dependency-free, themed by CSS custom properties. |
+| [`packages/spec`](packages/spec) | OpenAPI + TS + Python types + lifecycle contract | The single source of truth for the wire format **and** the report lifecycle. Backends honor it; e2e tests enforce it. |
 | [`packages/backend-python`](packages/backend-python) | Python (Flask blueprint) | `from bug_report import blueprint, FilesystemStore` — wire it into any Flask app. |
 | [`packages/backend-node`](packages/backend-node) | Node (Express + Azure adapter) | `import { createBugsRouter } from 'bug-report-node'` — wire it into Express, Azure Functions, or your own server. |
 | [`packages/cli`](packages/cli) | Python | `report-bug "title" "details"` — what your tmux-spawned Claudes and CI jobs call to file bugs. |

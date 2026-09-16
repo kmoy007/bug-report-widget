@@ -1,0 +1,62 @@
+/* bug-report-triage — the admin queue.
+ *
+ * Every colour is a custom property with a neutral fallback, so a host app
+ * themes this by setting the properties and nothing else. The consuming
+ * apps here run a dark ops dashboard, two light viewers and a branded
+ * admin page; none of them should have to override a selector.
+ *
+ * The one rule worth stating: a fill colour is never used as text. Each
+ * status has a SOFT surface and its own TEXT colour, because the obvious
+ * shortcut — tinting type with the same value as the dot — is how a
+ * palette ships unreadable labels.
+ */
+
+.bugt-controls { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+.bugt-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px;
+              color: var(--bugt-muted, #6b7280); text-transform: uppercase; letter-spacing: .04em; }
+.bugt-field select { font: inherit; font-size: 13px; text-transform: none; letter-spacing: 0;
+                     padding: 5px 8px; border-radius: 6px;
+                     border: 1px solid var(--bugt-line, #d8dce2);
+                     background: var(--bugt-panel, #fff); color: var(--bugt-ink, #1f2328); }
+
+.bugt-btn { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+            border: 1px solid var(--bugt-line, #d8dce2);
+            background: var(--bugt-panel, #fff); color: var(--bugt-ink, #1f2328); }
+.bugt-btn:hover { border-color: var(--bugt-accent, #4652a3); color: var(--bugt-accent, #4652a3); }
+.bugt-btn:disabled { opacity: .55; cursor: default; }
+
+.bugt-note { font-size: 13px; color: var(--bugt-muted, #6b7280); padding: 8px 0; }
+
+/* One report. <details> so it is keyboard-operable for free — a click
+ * handler on a div is invisible to an accessibility audit, which is the
+ * reason this is not a div. */
+.bugt { border: 1px solid var(--bugt-line, #d8dce2); border-radius: 10px; margin-bottom: 8px;
+        background: var(--bugt-panel, #fff); }
+.bugt > summary { list-style: none; cursor: pointer; padding: 10px 14px;
+                  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bugt > summary::-webkit-details-marker { display: none; }
+.bugt > summary:hover { background: var(--bugt-tint, #f6f7f9); border-radius: 10px; }
+.bugt-title { font-size: 14px; font-weight: 600; color: var(--bugt-ink, #1f2328); margin-right: auto; }
+.bugt-self { border-color: var(--bugt-accent, #4652a3); }
+
+.bugt-chip { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+             background: var(--bugt-tint, #eef0f3); color: var(--bugt-muted, #6b7280); }
+.bugt-st-open      { background: var(--bugt-warn-soft, #fcf1de); color: var(--bugt-warn-text, #8a5a12); }
+.bugt-st-triaged   { background: var(--bugt-info-soft, #e4f6f9); color: var(--bugt-info-text, #1c5d80); }
+.bugt-st-resolved  { background: var(--bugt-ok-soft, #e6f5ee);   color: var(--bugt-ok-text, #1f7a4f); }
+.bugt-st-declined  { background: var(--bugt-tint, #eef0f3);      color: var(--bugt-muted, #6b7280); }
+.bugt-kind-bug     { background: var(--bugt-tint, #eef0f3);      color: var(--bugt-muted, #6b7280); }
+.bugt-kind-feature { background: var(--bugt-info-soft, #e4f6f9); color: var(--bugt-info-text, #1c5d80); }
+
+.bugt-body { padding: 0 14px 14px; font-size: 13px; line-height: 1.55; color: var(--bugt-ink, #1f2328); }
+.bugt-details { white-space: pre-wrap; word-break: break-word; margin-bottom: 10px; }
+.bugt-shot { max-width: 100%; border-radius: 8px; border: 1px solid var(--bugt-line, #d8dce2);
+             display: block; margin: 0 0 10px; }
+.bugt-kv { font-size: 12px; color: var(--bugt-muted, #6b7280); word-break: break-all; }
+.bugt-key { display: inline-block; min-width: 76px; font-weight: 600; }
+.bugt-section { margin-top: 12px; font-size: 12px; }
+.bugt-audit { color: var(--bugt-muted, #6b7280); margin-top: 3px; }
+.bugt-audit-note { font-style: italic; }
+.bugt-turn { margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+.bugt-who { display: inline-block; min-width: 76px; font-weight: 600; color: var(--bugt-muted, #6b7280); }
+.bugt-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }

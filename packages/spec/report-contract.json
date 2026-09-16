@@ -1,0 +1,227 @@
+{
+  "_README": [
+    "THE REPORT CONTRACT — one shape for every bug / feature / capability report",
+    "in the suite. This file is MIRRORED BYTE-IDENTICALLY into every repo that",
+    "owns a report queue (LeapHQ, pikpak-fleet-dashboard, leap-daily-report,",
+    "stoppageviewer, PlacementImageViewer). Each side has a test that reads it",
+    "and asserts its own serialiser emits this shape and its own UI consumes it.",
+    "",
+    "Same idea as tests/fixtures/report_payload.json in the fleet<->daily-report",
+    "split and security-headers.json in this repo: the fixture IS the contract,",
+    "so a change to it is a reviewable line in a diff rather than a surprise in",
+    "production. See documents/report-queue-common-design.md.",
+    "",
+    "Changing this file means changing it in every repo. If a field must differ",
+    "per app, it does not belong here."
+  ],
+
+  "_version": [
+    "v2, 2026-09-16 — settled BEFORE the fixture was mirrored into the other",
+    "four repos, because every one of these is a one-repo edit today and a",
+    "five-repo edit afterwards. v1 lived for one day and one repo.",
+    "Changes from v1: `source` -> `app` with `source` reserved; `transitions`",
+    "is what the server enforces EXACTLY (with `offered` split out as what the",
+    "UI shows); `transcript` moved to optional and must be rendered where it",
+    "exists; `context`/`attachments` recorded as deliberately out of scope."
+  ],
+  "version": 2,
+
+  "_statuses": [
+    "The lifecycle every store shares. LeapHQ ran open|triaged|resolved until",
+    "2026-09-16 and could not decline a report at all, while every plug-in",
+    "could — so a declined plug-in row was unreachable in core's filter and",
+    "federation had to stay read-only. Four statuses, one vocabulary."
+  ],
+  "statuses": ["open", "triaged", "resolved", "declined"],
+
+  "_closedStatuses": [
+    "What 'still waiting on a human' means, by exclusion. A status NOT listed",
+    "here is treated as open — including one this contract has never heard of,",
+    "because a triage list that silently drops an unrecognised report is the",
+    "worse of the two failures."
+  ],
+  "closedStatuses": ["resolved", "declined"],
+
+  "_transitions": [
+    "What the SERVER must accept, exactly — not a floor. v1 of this contract",
+    "said 'a server may accept more', which let two apps behave differently",
+    "while both conforming: LeapHQ refuses open -> resolved, and every",
+    "bug-report-py server accepts any of the four because it validates the",
+    "status and not the move. A contract that permits that is not settling",
+    "anything. If a transition belongs, put it in this map."
+  ],
+  "transitions": {
+    "open": ["triaged", "declined"],
+    "triaged": ["resolved", "declined", "open"],
+    "resolved": ["open"],
+    "declined": ["open"]
+  },
+
+  "_offered": [
+    "What the triage UI must SHOW from each status — a subset of the map",
+    "above, because not every legal move is worth a button. `triaged -> open`",
+    "is the escape hatch: legal, but a Reopen button on a triaged row reads",
+    "as a mistake, so it is reachable through the API and not offered.",
+    "Declining captures a reason, carried as the audit row's `note`."
+  ],
+  "offered": {
+    "open": ["triaged", "declined"],
+    "triaged": ["resolved", "declined"],
+    "resolved": ["open"],
+    "declined": ["open"]
+  },
+  "reasonRequiredFor": ["declined"],
+
+  "_kinds": [
+    "A queue holds more than bugs. The fleet dashboard's request_capability",
+    "tool files a kind and encodes the choice as a TAG; LeapHQ built a",
+    "separate table for the same idea, so a fleet feature request arrived in",
+    "core's BUGS list mislabelled. `kind` is a first-class field so both can",
+    "say the same thing, derived from tags because every row predates it.",
+    "",
+    "TWO kinds, not three. `capability` was retired in the fleet dashboard on",
+    "2026-09-16 (its PR #225, 'a new ability of the agent's is a feature",
+    "request like any other') and its tool's enum is now bug|feature. This",
+    "contract briefly declared three, drafted from a survey taken before that",
+    "landed — the mirror into that repo is what caught it, which is the",
+    "argument for mirroring early rather than at the end. A contract derived",
+    "from implementations defers to them when they decide something.",
+    "",
+    "`capability-request` therefore survives as a LEGACY TAG that maps to",
+    "`feature`: those rows keep the tag they were written with, and read as",
+    "what they always were."
+  ],
+  "kinds": ["bug", "feature"],
+  "defaultKind": "bug",
+  "kindTags": {
+    "feature": ["feature", "feature-request", "capability", "capability-request"],
+    "bug": ["bug", "bug-request"]
+  },
+
+  "_app": [
+    "WHICH QUEUE a report came from, on a merged list: `leaphq`, `fleet`,",
+    "`report`. Stamped by the federating reader, never by the filer.",
+    "",
+    "This was called `source` until v2, which collided head-on with the",
+    "`source-on-every-report` pattern, where `source` is the FILER'S SURFACE",
+    "(`web-iphone`, `ios-app`, `agent-chat`), UA-classified at filing time so",
+    "triage can route by device class. Two meanings, one name, and a",
+    "conformance table claiming the pattern was satisfied because the name was",
+    "present. Renaming was a one-consumer edit while this contract lived in one",
+    "repo; after mirroring it would be a five-repo edit. Hence now.",
+    "",
+    "`source` is therefore RESERVED and deliberately unimplemented — the name",
+    "is freed, the feature is not built. Do not reuse it for anything else."
+  ],
+  "appField": "app",
+  "reservedFields": ["source"],
+
+  "_summaryFields": [
+    "Every field a LIST row must carry. The federation adapter used to drop",
+    "details and metaBuildSha on the way in, so a plug-in report reached core",
+    "without the one piece of metadata the pattern calls most useful. Anything",
+    "here survives federation.",
+    "",
+    "`screenshot` is a BOOLEAN — 'is there one' — never a path or a URL. The",
+    "bytes live in the filing app's own store and are fetched separately, so",
+    "a list row must not carry them. This field was drafted as",
+    "`hasScreenshot` from LeapHQ's internal shape and renamed within the day:",
+    "mirroring the fixture into the fleet dashboard showed that all four",
+    "bug-report-py apps emit `screenshot`, and a contract should speak the",
+    "name its implementations already use. Found BY doing the mirror, which",
+    "is the argument for doing it before the fixture spreads."
+  ],
+  "summaryFields": [
+    "id",
+    "title",
+    "kind",
+    "tags",
+    "status",
+    "addedBy",
+    "addedAt",
+    "actorEmail",
+    "screenshot"
+  ],
+
+  "_detailFields": [
+    "What a DETAIL read adds on top of the summary. Every store already keeps",
+    "all of it; until 2026-09-16 LeapHQ's triage screen rendered none of it and",
+    "had no detail route at all, so a bug report could only be read as its own",
+    "title.",
+    "",
+    "`transcript` is OPTIONAL and the only field here a store may legitimately",
+    "not have: bug-report-py keeps one (the fleet's agent attaches the last 5",
+    "chat turns when it files on itself), LeapHQ does not collect one yet. A",
+    "reader must RENDER it where it exists — it was stored by four apps and",
+    "displayed by none, which is worse than not collecting it. Everything else",
+    "here is required."
+  ],
+  "detailFields": [
+    "details",
+    "metaUrl",
+    "metaUserAgent",
+    "metaBuildSha",
+    "audit"
+  ],
+  "optionalDetailFields": ["transcript"],
+
+  "_outOfScope": [
+    "The canonical pattern's v2 sketch also proposes a free-form",
+    "`context: object` and an `attachments[]` array. Deliberately NOT here:",
+    "no app in this suite has either, and adding speculative fields to a",
+    "contract five repos must honour is the same mistake as extracting a",
+    "shared implementation early. Add them when a second app wants one."
+  ],
+  "outOfScope": ["context", "attachments"],
+
+  "_auditFields": ["One row per transition. The actor is the authenticated caller, never the body."],
+  "auditFields": ["changedAt", "changedBy", "fromStatus", "toStatus", "note"],
+
+  "_limits": ["Server-enforced, not client. Shared by every store."],
+  "limits": {
+    "detailsMaxBytes": 10240,
+    "screenshotMaxBytes": 5242880,
+    "titleMaxChars": 200
+  },
+
+  "_example": [
+    "A complete record in the wire shape. Both sides round-trip THIS object:",
+    "the serialiser must be able to emit it, the renderer must be able to",
+    "display it without inventing or dropping a field."
+  ],
+  "example": {
+    "id": "bug-20260915-084210-7c327e",
+    "title": "Hour picker sticks on the second tap",
+    "kind": "bug",
+    "tags": ["bug", "agent-self-report"],
+    "status": "triaged",
+    "addedBy": "agent",
+    "addedAt": "2026-09-15T08:42:10.000Z",
+    "actorEmail": "ken.moynihan@helloleap.ai",
+    "screenshot": true,
+    "app": "leaphq",
+    "details": "Tapping 7.5 twice leaves the picker open and the value unset.",
+    "metaUrl": "https://hq.helloleap.ai/index.html?tab=entry",
+    "metaUserAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X)",
+    "metaBuildSha": "24598ba",
+    "transcript": [
+      { "user": "log 2h to admin yesterday", "assistant": "Which admin code did you mean?" }
+    ],
+    "audit": [
+      {
+        "changedAt": "2026-09-15T08:42:10.000Z",
+        "changedBy": "agent:ken.moynihan@helloleap.ai",
+        "fromStatus": "",
+        "toStatus": "open",
+        "note": "filed"
+      },
+      {
+        "changedAt": "2026-09-15T09:10:00.000Z",
+        "changedBy": "ken.moynihan@helloleap.ai",
+        "fromStatus": "open",
+        "toStatus": "triaged",
+        "note": ""
+      }
+    ]
+  }
+}

@@ -33,8 +33,31 @@ from .models import (
 
 __version__ = "1.0.0"
 
+from . import contract
+from .contract import (
+    KINDS,
+    TRANSITIONS,
+    OFFERED,
+    REASON_REQUIRED_FOR,
+    CLOSED_STATUSES,
+    kind_from_tags,
+    is_valid_transition,
+    is_closed,
+    with_kind,
+)
+
 __all__ = [
     "create_blueprint",
+    "contract",
+    "KINDS",
+    "TRANSITIONS",
+    "OFFERED",
+    "REASON_REQUIRED_FOR",
+    "CLOSED_STATUSES",
+    "kind_from_tags",
+    "is_valid_transition",
+    "is_closed",
+    "with_kind",
     "Store",
     "StoreError",
     "NotFound",

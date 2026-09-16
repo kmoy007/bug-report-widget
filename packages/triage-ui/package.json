@@ -1,0 +1,16 @@
+{
+  "name": "bug-report-triage",
+  "version": "1.0.0",
+  "description": "The admin triage queue for bug-report-widget. Backend-agnostic; speaks the bug-report-widget API spec and its report lifecycle contract.",
+  "main": "src/triage.js",
+  "files": [
+    "src/triage.js",
+    "src/triage.css",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": ["bug-report", "triage", "admin", "queue"],
+  "license": "MIT"
+}

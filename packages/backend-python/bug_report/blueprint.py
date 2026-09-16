@@ -12,6 +12,7 @@ from typing import Callable
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
+from . import contract
 from .models import (
     BUG_DETAILS_MAX,
     BUG_SCREENSHOT_MAX,
@@ -171,7 +172,8 @@ def create_blueprint(
             days = max(1, min(365, int(request.args.get("days") or 30)))
         except ValueError:
             return jsonify({"error": "days must be an integer"}), 400
-        rows = [b.to_summary() for b in store.list_bugs(status=status_filter, since_iso=_since_iso(days))]
+        rows = [contract.with_kind(b.to_summary())
+                for b in store.list_bugs(status=status_filter, since_iso=_since_iso(days))]
         rows.sort(key=lambda r: r["addedAt"], reverse=True)
         return jsonify({"bugs": rows})
 
@@ -207,14 +209,25 @@ def create_blueprint(
         if new_status not in BUG_STATUSES:
             return jsonify({"error": f"status must be one of {BUG_STATUSES}"}), 400
         note = (payload.get("note") or "")[:500]
+        old = bug.status
+        # The lifecycle gate. This route used to check only that the
+        # status was a member of the enum, which let `open -> resolved`
+        # through here and 409 in a sibling app reading the same queue.
+        # A same-status PATCH is the documented no-op below, so it is not
+        # a transition and is exempt.
+        if new_status != old and not contract.is_valid_transition(old, new_status):
+            return jsonify({"error": f"cannot transition {old} -> {new_status}"}), 409
+        if (new_status in contract.REASON_REQUIRED_FOR and new_status != old
+                and not note.strip()):
+            return jsonify({"error": f"a reason is required to mark a report {new_status}"}), 400
         changed_by = (
             payload.get("changedBy") or payload.get("changed_by") or default_actor_email or "admin"
         )[:200]
 
-        old_status = bug.status
+        old_status = old
         if new_status == old_status:
             # No-op: don't write a meaningless audit row.
-            full = bug.to_full()
+            full = contract.with_kind(bug.to_full())
             full["audit"] = [a.to_dict() for a in store.list_audit(bug_id)]
             return jsonify(full)
 
@@ -226,7 +239,7 @@ def create_blueprint(
             changed_by=changed_by,
             note=note,
         ))
-        full = bug.to_full()
+        full = contract.with_kind(bug.to_full())
         full["audit"] = [a.to_dict() for a in store.list_audit(bug_id)]
         return jsonify(full)
 

@@ -60,6 +60,7 @@ def create_blueprint(
     store: Store,
     is_admin: Callable | None = None,
     default_actor_email: str = "",
+    actor_identity: Callable | None = None,
     build_sha: str | Callable[[], str] = "",
     url_prefix: str = "/bugs",
 ) -> Blueprint:
@@ -70,6 +71,13 @@ def create_blueprint(
         is_admin: ``(request) -> bool`` gate for ``GET /bugs`` and ``PATCH``.
                   Default: allow everything (suitable for single-user apps).
         default_actor_email: Email stamped on reports filed without one.
+        actor_identity: ``(request) -> str`` returning the CHECKED identity of
+                  the person filing (e.g. from EasyAuth's principal). When
+                  given, it alone decides the report's ``actorEmail``: the
+                  payload's ``actorEmail`` is ignored, because a page can
+                  claim any address, and an empty answer files the report
+                  with no actor rather than with the claim. Without it the
+                  payload's value is used, as before. Added in 2.1.0.
         build_sha: String or zero-arg callable returning the current build SHA.
                    Stamped on each report. Empty string means "unknown".
         url_prefix: Mount path within the blueprint. Outer app typically
@@ -105,9 +113,15 @@ def create_blueprint(
 
         title = (payload.get("title") or details.splitlines()[0])[:100].strip()
         added_by = (payload.get("addedBy") or payload.get("added_by") or "web").strip()[:32] or "web"
-        actor_email = (
-            payload.get("actorEmail") or payload.get("actor_email") or default_actor_email
-        ).strip()[:200]
+        if actor_identity is not None:
+            try:
+                actor_email = (actor_identity(request) or "").strip()[:200]
+            except Exception:  # an identity that cannot be read is no identity, never a 500
+                actor_email = ""
+        else:
+            actor_email = (
+                payload.get("actorEmail") or payload.get("actor_email") or default_actor_email
+            ).strip()[:200]
 
         tags = payload.get("tags") or ["bug"]
         if isinstance(tags, str):

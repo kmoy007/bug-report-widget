@@ -271,3 +271,42 @@ def test_build_sha_callable(store):
     b2 = c.post("/bugs", json={"details": "y"}).get_json()["id"]
     assert c.get(f"/bugs/{b1}").get_json()["metaBuildSha"] == "v1"
     assert c.get(f"/bugs/{b2}").get_json()["metaBuildSha"] == "v2"
+
+
+# ----- actor_identity (2.1.0) ------------------------------------------
+# The filer used to come from the payload, and the shipped widget sends none,
+# so every app on this package recorded reports with no filer: a merged queue
+# could not tell whose report was whose (LeapHQ, 2026-10-03). An app that can
+# check who is asking now says so, and the page's claim stops counting.
+
+def _app_with_identity(store, identity):
+    app = Flask(__name__)
+    app.register_blueprint(create_blueprint(store=store, is_admin=lambda r: True, actor_identity=identity))
+    return app.test_client()
+
+
+def test_actor_identity_decides_the_filer_and_the_payload_claim_is_ignored(store):
+    client = _app_with_identity(store, lambda req: req.headers.get("X-Who", ""))
+    r = client.post("/bugs", json={"details": "d", "actorEmail": "claimed@x.ai"}, headers={"X-Who": "checked@x.ai"})
+    assert r.status_code == 201
+    assert store.get_bug(r.get_json()["id"]).actor_email == "checked@x.ai"
+
+
+def test_actor_identity_answering_nothing_files_with_no_actor_never_the_claim(store):
+    client = _app_with_identity(store, lambda req: "")
+    r = client.post("/bugs", json={"details": "d", "actorEmail": "claimed@x.ai"})
+    assert store.get_bug(r.get_json()["id"]).actor_email == ""
+
+
+def test_actor_identity_that_raises_files_the_report_with_no_actor(store):
+    def boom(req):
+        raise RuntimeError("principal unreadable")
+    client = _app_with_identity(store, boom)
+    r = client.post("/bugs", json={"details": "d", "actorEmail": "claimed@x.ai"})
+    assert r.status_code == 201
+    assert store.get_bug(r.get_json()["id"]).actor_email == ""
+
+
+def test_without_actor_identity_the_payload_is_used_as_before(client, store):
+    r = client.post("/bugs", json={"details": "d", "actorEmail": "page@x.ai"})
+    assert store.get_bug(r.get_json()["id"]).actor_email == "page@x.ai"

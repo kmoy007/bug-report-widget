@@ -2,6 +2,18 @@
 
 All notable changes to this monorepo.
 
+## backend-python v2.1.0 — 2026-10-03
+
+- **`create_blueprint(actor_identity=…)`** — an optional `(request) -> str`
+  returning the checked identity of whoever is filing. When an app passes
+  it, that identity is the report's `actorEmail` and the payload's
+  `actorEmail` is ignored (a page can claim any address); an empty answer,
+  or one that raises, files the report with no actor rather than with the
+  claim. Without it nothing changes, so this is a minor. Why: the shipped
+  widget sends no `actorEmail`, so every app on this package recorded its
+  reports with no filer, and LeapHQ's merged queue could not tell whose
+  report was whose.
+
 ## backend-python v2.0.0 · triage-ui v1.0.0 · spec — 2026-09-16
 
 **Breaking for `backend-python`, deliberately.** `PATCH /bugs/{id}` used to

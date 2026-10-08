@@ -88,3 +88,27 @@ test("markup that was cancelled (null) leaves the capture alone", () => {
   ctl.applyMarkup(null);
   assert.equal(ctl._state().capturedDataUrl, null);
 });
+
+function marked() {
+  const doc = makeDoc();
+  const ctl = widget.createController({
+    document: doc, window: { location: { href: "x" }, navigator: {} },
+    fetch: () => new Promise(() => {}), html2canvas: null, config: {},
+  });
+  ctl.openModal();
+  return { doc, ctl };
+}
+
+test("marks that could not be encoded say so instead of vanishing", () => {
+  const { doc, ctl } = marked();
+  ctl.applyMarkup(null, [{ kind: "box", pts: [[0, 0], [1, 1]] }]);
+  assert.match(doc._find("-hint").textContent, /too large/);
+  assert.equal(ctl._state().capturedDataUrl, null);
+});
+
+test("a cancelled round (no marks) says nothing", () => {
+  const { doc, ctl } = marked();
+  doc._find("-hint").textContent = "Screenshot captured.";
+  ctl.applyMarkup(null, []);
+  assert.equal(doc._find("-hint").textContent, "Screenshot captured.");
+});

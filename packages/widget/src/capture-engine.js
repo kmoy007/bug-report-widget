@@ -23,11 +23,15 @@
   var real = window.html2canvas, h2i = window.htmlToImage;
   if (!real || !h2i || !h2i.toCanvas) return;
 
+  // The canvas is filled white first, so "drew nothing" means all white, not
+  // transparent. Same 8x8 sample as the widget's own isBlankCanvas.
   function blank(c) {
     try {
-      var w = Math.min(c.width, 64), h = Math.min(c.height, 64);
-      var d = c.getContext("2d").getImageData(0, 0, w, h).data;
-      for (var i = 3; i < d.length; i += 4) if (d[i]) return false;
+      var ctx = c.getContext("2d"), n = 8;
+      for (var x = 0; x < n; x++) for (var y = 0; y < n; y++) {
+        var d = ctx.getImageData(Math.floor((x + 0.5) * c.width / n), Math.floor((y + 0.5) * c.height / n), 1, 1).data;
+        if (!(d[0] === 255 && d[1] === 255 && d[2] === 255)) return false;
+      }
       return true;
     } catch (e) { return false; }
   }

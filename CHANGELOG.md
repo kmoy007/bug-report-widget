@@ -19,8 +19,8 @@ All notable changes to this monorepo.
   the widget) puts the browser's own renderer in front of it; html2canvas stays as the
   fallback if it fails or draws nothing. Inline SVG styled by CSS (a chart) needs its computed
   styles pinned for the capture or it paints black; the engine does that. It skips everything
-  below the visible area, since its cost is per DOM node (a 300-card page: ~0.5 s, from ~5 s
-  for 100) — and apps with big pages should raise `captureTimeoutMs`. Not used unless loaded.
+  below the visible area, since its cost is per DOM node (on a 100-card page: ~5 s before,
+  ~0.3 s after) — and apps with big pages should raise `captureTimeoutMs`. Not used unless loaded.
   Neither engine draws `<video>` frames or iframe content.
 
 ## backend-python v2.1.0 — 2026-10-03

@@ -351,7 +351,9 @@
 
   // Opens a full-window viewer on `src` (a data URL or URL).
   //   opts.annotate  show the pen and box tools and Done/Cancel
-  //   opts.onDone    (dataUrl|null) — the marked-up image, or null if nothing was drawn
+  //   opts.strokes   marks from an earlier round, so they can still be undone
+  //   opts.onDone    (dataUrl|null, strokes) — the marked-up image; null if nothing was drawn,
+  //                  or if it could not be encoded under the size cap
   // deps = {document, window}. Marks are kept as strokes in image pixels and
   // painted over the image, so zooming never changes what ends up in the file.
   function openViewer(deps, src, opts) {
@@ -372,7 +374,7 @@
 
     function build(img) {
       var W = img.naturalWidth, H = img.naturalHeight;
-      var strokes = [];            // {kind: "pen"|"box", pts: [[x, y], …]} in image pixels
+      var strokes = (opts.strokes || []).slice();   // {kind: "pen"|"box", pts: [[x, y], …]} in image pixels
       var tool = opts.annotate ? "pen" : "move";
       var view = { z: 1, tx: 0, ty: 0 }, cur = null, panFrom = null;
 
@@ -481,7 +483,8 @@
         if (!keep || !opts.onDone) return;
         // Through the same size ladder as the capture, so a busy annotated PNG
         // still lands under the backend's cap.
-        opts.onDone(strokes.length ? encodeCanvasUnderCap(cv, DEFAULTS.maxScreenshotBytes, doc) : null);
+        if (!strokes.length) { opts.onDone(null, []); return; }
+        opts.onDone(encodeCanvasUnderCap(cv, DEFAULTS.maxScreenshotBytes, doc), strokes);
       }
 
       doc.body.appendChild(root);
@@ -795,17 +798,26 @@
 
     // The reporter's marked-up image replaces the capture: what the preview
     // shows is what is sent, so there is no second copy to go stale.
-    function applyMarkup(dataUrl) {
-      if (!dataUrl) return;
-      capturedDataUrl = dataUrl;
-      var prev = deps.document.getElementById(modalId + "-preview");
+    // `original` and `strokes` are kept so a second round starts from the
+    // untouched capture with the first round's marks still undoable.
+    var originalDataUrl = null, markStrokes = [];
+    function applyMarkup(dataUrl, strokes) {
       var hint = deps.document.getElementById(modalId + "-hint");
+      var prev = deps.document.getElementById(modalId + "-preview");
+      if (!dataUrl) {
+        if (strokes && strokes.length && hint) {
+          hint.textContent = "Could not keep the marks — the image is too large to send. Sending it unmarked.";
+        }
+        return;
+      }
+      capturedDataUrl = dataUrl;
+      markStrokes = strokes || [];
       if (prev) prev.src = dataUrl;
       if (hint) hint.textContent = "Screenshot marked up. Click it to edit more.";
     }
 
     function closeModal() {
-      capturedDataUrl = null;
+      capturedDataUrl = null; originalDataUrl = null; markStrokes = [];
       removeById(deps.document, modalId);
     }
 
@@ -858,7 +870,7 @@
       var hintEl = deps.document.getElementById(modalId + "-hint");
       var previewEl = deps.document.getElementById(modalId + "-preview");
       captureScreenshot(deps, cfg).then(function (dataUrl) {
-        capturedDataUrl = dataUrl;
+        capturedDataUrl = dataUrl; originalDataUrl = dataUrl; markStrokes = [];
         // Modal may have been closed by the user mid-capture; only paint
         // if it's still in the DOM.
         if (!deps.document.getElementById(modalId)) return;
@@ -869,7 +881,7 @@
               previewEl.style.cursor = "zoom-in";
               previewEl.title = "Click to zoom and mark up";
               previewEl.addEventListener("click", function () {
-                openViewer(deps, capturedDataUrl, { annotate: true, onDone: applyMarkup });
+                openViewer(deps, originalDataUrl, { annotate: true, strokes: markStrokes, onDone: applyMarkup });
               });
             }
           }

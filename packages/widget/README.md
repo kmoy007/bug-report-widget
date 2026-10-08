@@ -63,6 +63,33 @@ load and on every resize, so it can never be restored off-screen.
 | `window.BugReportWidget.buildPostBody(opts)` | pure fn | Returns the request body sent to `/api/bugs`. Wire-format-stable. |
 | `window.BugReportWidget.isBlankCanvas(canvas)` | pure fn | Safari fallback signal — true if the canvas has no real pixels. |
 | `window.BugReportWidget.captureScreenshot(deps, cfg)` | async | Returns a data URL or `null` (fail/timeout/blank). |
+| `window.BugReportWidget.openViewer(src, {annotate, onDone})` | fn | The zoom/markup viewer, standalone. `annotate: false` is view-only. |
+
+## Zoom and mark up
+
+Clicking the screenshot preview in the modal opens a viewer: zoom (wheel, `+`/`−`, Fit,
+100%), pan (✋ Move), and ✏️ pen / ▭ box marks in red, with undo and clear. **Done** replaces
+the capture with the marked-up image, which is what gets POSTed. Set
+`BugReportConfig.markup = false` to turn it off.
+
+`BugReportWidget.openViewer(src, {annotate: false})` opens the same viewer view-only, for a
+triage screen that wants to zoom a filed screenshot.
+
+## A more faithful capture (optional)
+
+html2canvas re-implements CSS layout, and on some pages that comes out wrong. Two extra files
+put the browser's own renderer ([html-to-image](https://github.com/bubkoo/html-to-image), MIT)
+in front of it, with html2canvas as the fallback:
+
+```html
+<script src="/static/html2canvas.min.js" defer></script>
+<script src="/static/html-to-image.js" defer></script>
+<script src="/static/capture-engine.js" defer></script>
+<script src="/static/bug-report.js" defer></script>
+```
+
+Its cost is per DOM node, so a very large page wants `captureTimeoutMs: 20000` in
+`BugReportConfig`. It does not draw `<video>` frames or iframe content (nor does html2canvas).
 
 ## Opting elements out of capture
 

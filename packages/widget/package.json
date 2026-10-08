@@ -1,11 +1,14 @@
 {
   "name": "bug-report-widget",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Self-injecting in-app bug-reporting widget with screenshot capture. Backend-agnostic; speaks the bug-report-widget API spec.",
   "main": "src/bug-report.js",
   "files": [
     "src/bug-report.js",
     "src/html2canvas.min.js",
+    "src/capture-engine.js",
+    "src/html-to-image.js",
+    "src/html-to-image.LICENSE",
     "README.md"
   ],
   "scripts": {

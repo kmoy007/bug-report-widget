@@ -47,6 +47,9 @@
     // (feature requests, "the numbers look wrong") can say so.
     title: "Report a bug",
     captureTimeoutMs: 6000,
+    // Click the screenshot preview to zoom in and mark it up (pen, box) before
+    // filing. The marked-up image is what is sent.
+    markup: true,
     // Decoded-byte ceiling for the screenshot payload. Mirrors the reference
     // backend's server-side cap (which stays authoritative — never trust the
     // client). The client cap exists so a capture that would be rejected is
@@ -326,6 +329,167 @@
         }).catch(function () { settle(null); });
       } catch (e) { settle(null); }
     });
+  }
+
+  // ─── Screenshot viewer: zoom, pan and simple markup ────────────────
+
+  // Pure view maths, so the zoom behaviour is testable without a DOM.
+  // A view is {z, tx, ty}: the canvas is drawn scaled by z and offset (tx, ty).
+  var ZOOM_MIN = 0.1, ZOOM_MAX = 16;
+
+  function fitView(stageW, stageH, imgW, imgH) {
+    var z = Math.min(stageW / imgW, stageH / imgH, 1);
+    return { z: z, tx: (stageW - imgW * z) / 2, ty: (stageH - imgH * z) / 2 };
+  }
+
+  // Zoom by factor f keeping the point (px, py) of the stage fixed on screen.
+  function zoomAbout(view, px, py, f) {
+    var nz = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, view.z * f));
+    var k = nz / view.z;
+    return { z: nz, tx: px - (px - view.tx) * k, ty: py - (py - view.ty) * k };
+  }
+
+  // Opens a full-window viewer on `src` (a data URL or URL).
+  //   opts.annotate  show the pen and box tools and Done/Cancel
+  //   opts.strokes   marks from an earlier round, so they can still be undone
+  //   opts.onDone    (dataUrl|null, strokes) — the marked-up image; null if nothing was drawn,
+  //                  or if it could not be encoded under the size cap
+  // deps = {document, window}. Marks are kept as strokes in image pixels and
+  // painted over the image, so zooming never changes what ends up in the file.
+  function openViewer(deps, src, opts) {
+    opts = opts || {};
+    var doc = deps.document;
+    var ID = "bug-report-viewer";
+    if (doc.getElementById(ID)) return;
+    var img = doc.createElement("img");
+    img.onload = function () { build(img); };
+    img.src = src;
+
+    function el(tag, css, text) {
+      var e = doc.createElement(tag);
+      if (css) e.style.cssText = css;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+
+    function build(img) {
+      var W = img.naturalWidth, H = img.naturalHeight;
+      var strokes = (opts.strokes || []).slice();   // {kind: "pen"|"box", pts: [[x, y], …]} in image pixels
+      var tool = opts.annotate ? "pen" : "move";
+      var view = { z: 1, tx: 0, ty: 0 }, cur = null, panFrom = null;
+
+      var root = el("div", "position:fixed;inset:0;z-index:100010;background:rgba(10,12,16,.92);" +
+        "display:flex;flex-direction:column;font:14px system-ui,sans-serif;color:#fff");
+      root.id = ID;
+      root.setAttribute("data-bug-report-exclude", "true");
+      var bar = el("div", "display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 10px;background:#171b22");
+      var stage = el("div", "flex:1;position:relative;overflow:hidden;touch-action:none");
+      var cv = el("canvas", "position:absolute;left:0;top:0;transform-origin:0 0;background:#fff");
+      cv.width = W; cv.height = H;
+      stage.appendChild(cv);
+      root.appendChild(bar); root.appendChild(stage);
+
+      function btn(label, title, fn, id) {
+        var b = el("button", "padding:6px 11px;border:1px solid #3a4250;border-radius:8px;" +
+          "background:#232a35;color:#fff;font:inherit;cursor:pointer", label);
+        b.type = "button"; b.title = title; if (id) b.id = ID + "-" + id;
+        b.addEventListener("click", fn);
+        bar.appendChild(b);
+        return b;
+      }
+      var toolBtns = {};
+      function setTool(t) {
+        tool = t;
+        Object.keys(toolBtns).forEach(function (k) { toolBtns[k].style.background = k === t ? "#2f6df6" : "#232a35"; });
+        stage.style.cursor = t === "move" ? "grab" : "crosshair";
+      }
+      function apply() {
+        cv.style.transform = "translate(" + view.tx + "px," + view.ty + "px) scale(" + view.z + ")";
+      }
+      function fit() { view = fitView(stage.clientWidth, stage.clientHeight, W, H); apply(); }
+      function zoom(px, py, f) { view = zoomAbout(view, px, py, f); apply(); }
+      function mid(f) { zoom(stage.clientWidth / 2, stage.clientHeight / 2, f); }
+
+      toolBtns.move = btn("✋ Move", "Drag to pan, wheel to zoom", function () { setTool("move"); }, "move");
+      if (opts.annotate) {
+        toolBtns.pen = btn("✏️ Pen", "Draw freehand", function () { setTool("pen"); }, "pen");
+        toolBtns.box = btn("▭ Box", "Draw a box", function () { setTool("box"); }, "box");
+        btn("↶ Undo", "Remove the last mark", function () { strokes.pop(); draw(); }, "undo");
+        btn("Clear", "Remove all marks", function () { strokes = []; draw(); }, "clear");
+      }
+      btn("−", "Zoom out", function () { mid(1 / 1.4); }, "zoomout");
+      btn("+", "Zoom in", function () { mid(1.4); }, "zoomin");
+      btn("Fit", "Fit to window", fit, "fit");
+      btn("100%", "Actual size", function () { mid(1 / view.z); }, "actual");
+      bar.appendChild(el("span", "flex:1"));
+      if (opts.annotate) {
+        btn("Done", "Keep the marks and close", function () { close(true); }, "done").style.background = "#2f6df6";
+        btn("Cancel", "Discard the marks", function () { close(false); }, "cancel");
+      } else {
+        btn("Close", "Close", function () { close(false); }, "cancel");
+      }
+
+      // Mark weight follows the image, not the zoom, so a mark drawn zoomed in
+      // is as visible at fit as one drawn at fit.
+      var lineW = Math.max(3, Math.round(Math.max(W, H) / 350));
+      function draw() {
+        var ctx = cv.getContext("2d");
+        ctx.drawImage(img, 0, 0, W, H);
+        ctx.strokeStyle = "#e5322d"; ctx.lineWidth = lineW; ctx.lineCap = "round"; ctx.lineJoin = "round";
+        (cur ? strokes.concat([cur]) : strokes).forEach(function (s) {
+          ctx.beginPath();
+          if (s.kind === "box") {
+            var a = s.pts[0], b = s.pts[s.pts.length - 1];
+            ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+            return;
+          }
+          s.pts.forEach(function (p, i) { i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); });
+          if (s.pts.length === 1) ctx.lineTo(s.pts[0][0] + 0.01, s.pts[0][1]);
+          ctx.stroke();
+        });
+      }
+      function toImg(e) {
+        var r = stage.getBoundingClientRect();
+        return [(e.clientX - r.left - view.tx) / view.z, (e.clientY - r.top - view.ty) / view.z];
+      }
+      stage.addEventListener("pointerdown", function (e) {
+        try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+        if (tool === "move") { panFrom = [e.clientX - view.tx, e.clientY - view.ty]; stage.style.cursor = "grabbing"; return; }
+        cur = { kind: tool, pts: [toImg(e)] };
+      });
+      stage.addEventListener("pointermove", function (e) {
+        if (panFrom) { view.tx = e.clientX - panFrom[0]; view.ty = e.clientY - panFrom[1]; apply(); return; }
+        if (!cur) return;
+        if (cur.kind === "pen") cur.pts.push(toImg(e)); else cur.pts[1] = toImg(e);
+        draw();
+      });
+      function up() {
+        if (panFrom) { panFrom = null; stage.style.cursor = "grab"; return; }
+        if (cur) { strokes.push(cur); cur = null; draw(); }
+      }
+      stage.addEventListener("pointerup", up);
+      stage.addEventListener("pointercancel", up);
+      stage.addEventListener("wheel", function (e) {
+        e.preventDefault();
+        var r = stage.getBoundingClientRect();
+        zoom(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+      }, { passive: false });
+
+      function onKey(e) { if (e.key === "Escape") close(false); }
+      doc.addEventListener("keydown", onKey);
+      function close(keep) {
+        doc.removeEventListener("keydown", onKey);
+        if (root.parentNode) root.parentNode.removeChild(root);
+        if (!keep || !opts.onDone) return;
+        // Through the same size ladder as the capture, so a busy annotated PNG
+        // still lands under the backend's cap.
+        if (!strokes.length) { opts.onDone(null, []); return; }
+        opts.onDone(encodeCanvasUnderCap(cv, DEFAULTS.maxScreenshotBytes, doc), strokes);
+      }
+
+      doc.body.appendChild(root);
+      draw(); setTool(tool); fit();
+    }
   }
 
   // ─── DOM construction (browser only) ───────────────────────────────
@@ -632,8 +796,28 @@
       }, 3500);
     }
 
+    // The reporter's marked-up image replaces the capture: what the preview
+    // shows is what is sent, so there is no second copy to go stale.
+    // `original` and `strokes` are kept so a second round starts from the
+    // untouched capture with the first round's marks still undoable.
+    var originalDataUrl = null, markStrokes = [];
+    function applyMarkup(dataUrl, strokes) {
+      var hint = deps.document.getElementById(modalId + "-hint");
+      var prev = deps.document.getElementById(modalId + "-preview");
+      if (!dataUrl) {
+        if (strokes && strokes.length && hint) {
+          hint.textContent = "Could not keep the marks — the image is too large to send. Sending it unmarked.";
+        }
+        return;
+      }
+      capturedDataUrl = dataUrl;
+      markStrokes = strokes || [];
+      if (prev) prev.src = dataUrl;
+      if (hint) hint.textContent = "Screenshot marked up. Click it to edit more.";
+    }
+
     function closeModal() {
-      capturedDataUrl = null;
+      capturedDataUrl = null; originalDataUrl = null; markStrokes = [];
       removeById(deps.document, modalId);
     }
 
@@ -686,12 +870,21 @@
       var hintEl = deps.document.getElementById(modalId + "-hint");
       var previewEl = deps.document.getElementById(modalId + "-preview");
       captureScreenshot(deps, cfg).then(function (dataUrl) {
-        capturedDataUrl = dataUrl;
+        capturedDataUrl = dataUrl; originalDataUrl = dataUrl; markStrokes = [];
         // Modal may have been closed by the user mid-capture; only paint
         // if it's still in the DOM.
         if (!deps.document.getElementById(modalId)) return;
         if (dataUrl) {
-          if (previewEl) { previewEl.src = dataUrl; previewEl.style.display = "block"; }
+          if (previewEl) {
+            previewEl.src = dataUrl; previewEl.style.display = "block";
+            if (cfg.markup !== false) {
+              previewEl.style.cursor = "zoom-in";
+              previewEl.title = "Click to zoom and mark up";
+              previewEl.addEventListener("click", function () {
+                openViewer(deps, originalDataUrl, { annotate: true, strokes: markStrokes, onDone: applyMarkup });
+              });
+            }
+          }
           if (hintEl) { hintEl.textContent = "Screenshot captured."; }
         } else {
           if (hintEl) { hintEl.textContent = "Screenshot unavailable — you can still submit text."; }
@@ -722,6 +915,7 @@
       inject: inject,
       openModal: openModal,
       closeModal: closeModal,
+      applyMarkup: applyMarkup,
       _config: cfg,
       _state: function () {
         return {
@@ -756,6 +950,11 @@
     clampPos: clampPos,
     isBlankCanvas: isBlankCanvas,
     captureScreenshot: captureScreenshot,
+    openViewer: function (src, opts) {
+      return openViewer({ document: document, window: window }, src, opts);
+    },
+    fitView: fitView,
+    zoomAbout: zoomAbout,
     dataUrlBytes: dataUrlBytes,
     encodeCanvasUnderCap: encodeCanvasUnderCap,
     DEFAULTS: DEFAULTS,

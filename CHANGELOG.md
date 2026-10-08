@@ -2,6 +2,27 @@
 
 All notable changes to this monorepo.
 
+## widget v1.5.0 — 2026-10-08
+
+- **Zoom and mark up the screenshot.** Click the preview in the report modal to open a
+  viewer: wheel/+/−/Fit/100% zoom, drag to pan, ✏️ pen, ▭ box, undo, clear. Done puts the
+  marked-up image in place of the capture, so it is what gets filed (re-encoded through the
+  same size ladder, so it still fits the backend's cap). Marks are kept in image pixels, so
+  zoom never changes the file. `markup: false` in `BugReportConfig` turns it off.
+  `BugReportWidget.openViewer(src, {annotate: false})` opens the same viewer view-only —
+  for a triage screen that wants to zoom a filed screenshot. Why: a reporter could only
+  describe in words which part of the screen was wrong, and a triager could not read small
+  text in a downscaled preview (StoppageViewer, 2026-10-08).
+- **Optional `capture-engine.js` + `html-to-image.js`.** html2canvas re-implements CSS layout
+  and can get a real page wrong — StoppageViewer's came out with text piled on text and blocks
+  out of place (`bug-20261008-203620`). Loading these two files (after html2canvas, before
+  the widget) puts the browser's own renderer in front of it; html2canvas stays as the
+  fallback if it fails or draws nothing. Inline SVG styled by CSS (a chart) needs its computed
+  styles pinned for the capture or it paints black; the engine does that. It skips everything
+  below the visible area, since its cost is per DOM node (on a 100-card page: ~5 s before,
+  ~0.3 s after) — and apps with big pages should raise `captureTimeoutMs`. Not used unless loaded.
+  Neither engine draws `<video>` frames or iframe content.
+
 ## backend-python v2.1.0 — 2026-10-03
 
 - **`create_blueprint(actor_identity=…)`** — an optional `(request) -> str`

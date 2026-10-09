@@ -16,6 +16,26 @@ The design pattern that motivated this lives at [design-patterns/bug-report-patt
 | [`packages/cli`](packages/cli) | Python | `report-bug "title" "details"` — what your tmux-spawned Claudes and CI jobs call to file bugs. |
 | [`e2e/`](e2e) | Playwright | Boots the Python and Node backends and drives the same scenarios against both. |
 
+## Who uses it
+
+Every app that shows a 🐛 button vendors a copy of `packages/widget/src` (see each repo's
+`VENDOR.md`: version, commit and sha256 per file). **Update this list when an app adopts the
+widget**, and start any rollout from it. To re-derive it, search for the config object:
+
+```bash
+gh search code --owner LeapAutomation BugReportConfig
+```
+
+| App | Where its copy lives |
+|---|---|
+| StoppageViewer | `static/` |
+| pikpak-fleet-dashboard | `static/` |
+| pikpak-fleet-api | `static/` (Swagger docs page) |
+| PlacementImageViewer | `static/` |
+| leap-daily-report | `static/` |
+| seal-verification-image-viewer | `seal_viewer/static/` |
+| leap-timesheet | `lib/` (the ancestor of this widget; moving onto the shared copy) |
+
 ## Who's using it
 
 - **leap-timesheet** — the original; Node + Azure Functions.

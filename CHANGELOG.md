@@ -2,6 +2,65 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.0 — 2026-10-08
+
+One widget for every app: leap-timesheet and the seal viewer each carried an older fork with
+features the shared widget lacked. Everything below is opt-in or backwards-compatible; an app
+that changes nothing files the same POST as 1.5.0, apart from the changes marked **visible**.
+Spec: `clientKey` and `screenshotError` added as optional `BugCreate` fields (the reference
+backends ignore both; a contract test proves they still file the report).
+
+- **Bounded submit** (`submitTimeoutMs`, default 30 s; `slowNoticeMs`, 8 s). The POST is
+  aborted after the timeout; the button comes back and the text is kept. A `role="status"`
+  line says "Sending… uploading a 1.2 MB screenshot", then "Still sending…". After a timeout
+  the dialog says the report may already be filed. Why: leap-timesheet `bug-20260911-222709`,
+  where the server stored the row and answered 201 in 296 ms, the browser never acted on the
+  answer, and the reporter was left on "Submitting…" for a report that had been filed. **Visible.**
+- **Idempotency** (`idempotentSubmit: true`, off by default). Sends `clientKey`, one UUID per open
+  dialog and the same on every retry, so a server that dedupes on it can return the existing
+  row; the timeout message then adds "Submit again; it won't be filed twice". Off by default
+  because the reference backends ignore the key — promising "won't be filed twice" to an app
+  on them would be false, so without the option the message says submitting again could file
+  it twice. The reference backends are not taught to dedupe: it needs a lookup by key in each
+  of three stores in two languages, and the apps that need it (timesheet) have their own server.
+- **Why there is no screenshot.** `captureScreenshotDetailed` resolves `{dataUrl, reason, …}`
+  with `no-library | timeout | render-error | blank | encode-error | too-large | tainted`;
+  `captureScreenshot` still returns `dataUrl | null`. The modal now reads "Screenshot
+  unavailable (why) — you can still submit text." (**visible**), the POST carries
+  `screenshotError` when there is no image, and a new `onClientEvent(kind, detail)` hook hears
+  `screenshot-failure` and `submit-timeout` for apps that log. Why: leap-timesheet
+  `bug-20260915-000612` — reports from one tab arrived with no screenshot and nothing said
+  which of five causes it was. A cross-origin-tainted canvas used to read as "blank".
+- **Escape closes the dialog**, except while the screenshot viewer is open (its own Escape
+  closes it). The dialog gains `role="dialog"` and `aria-modal`. **Visible.**
+- **`position` accepts `{top, left}`** (and any mix with `{bottom, right}`).
+- **Lazy html2canvas** (`html2canvasUrl`). If `window.html2canvas` is absent when a screenshot
+  is needed, the script is injected on first click and awaited inside `captureTimeoutMs`;
+  quick repeats share one script, a failed load can be retried. No URL = 1.5.0 behaviour.
+- **Reachable over a modal `<dialog>`** (`reachOverDialogs`, default **on**; `false` opts out).
+  `showModal()` makes the rest of the page inert, so the button could not be clicked in the
+  one situation where someone most wants to report what they see. The widget now moves its
+  button, form, viewer and toast into the topmost open modal dialog and back. From the seal
+  viewer's `keepBugUiReachable()`, plus: the toast follows, and a dialog removed from the page
+  with them inside gives them back first. Apps that already do this themselves are unaffected.
+  **Default on is a behaviour change** for pages with modal dialogs.
+- **Viewer ids unchanged.** The viewer's DOM id stays `bug-report-viewer` whatever `idPrefix`
+  is (apps' tests select it); documented rather than changed.
+- **Viewer:** pinch-zoom with two fingers (Move tool); a second finger is ignored while
+  drawing; the toolbar and viewer pad for `safe-area-inset-*`; marks are drawn on an overlay
+  canvas and the image is composited once on Done, instead of repainting the whole image on
+  every pointermove (a pen drag now costs one segment per move). `pointercancel` discards the
+  half-drawn mark instead of keeping it.
+- **Fixes found on the way:** a capture that finished after its modal was closed (or closed
+  and reopened) could overwrite the new modal's screenshot; a late successful submit after
+  Cancel closed whatever modal was open by then. The capture's trailing timeout is cleared
+  once it settles.
+- **`capture-engine.js`** exposes its pure parts (the "drew nothing" check and the options it
+  hands html-to-image) to Node, and is unit-tested; browser behaviour is unchanged.
+- **Not ported from the forks:** timesheet's capture-first ordering (it waits for the capture
+  before showing the dialog; the shared widget shows the dialog at once and fills the preview
+  in) and its own `/api/client-events` posting (the hook replaces it: the app posts).
+
 ## widget v1.5.0 — 2026-10-08
 
 - **Zoom and mark up the screenshot.** Click the preview in the report modal to open a

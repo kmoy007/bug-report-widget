@@ -33,6 +33,19 @@ def test_post_minimal(backend_url):
     assert ID_RE.match(bid), bid
 
 
+def test_post_accepts_widget_1_6_optional_fields(backend_url):
+    """Widget 1.6.0 may send `clientKey` and `screenshotError`. Both are optional,
+    and a server that does not use them (these two) must still file the report."""
+    r = requests.post(backend_url, json={
+        "details": "from widget 1.6.0",
+        "clientKey": "123e4567-e89b-12d3-a456-426614174000",
+        "screenshotError": "capture timed out after 6s",
+        "screenshot": None,
+    })
+    assert r.status_code == 201, r.text
+    assert ID_RE.match(r.json()["id"])
+
+
 def test_post_without_details(backend_url):
     assert requests.post(backend_url, json={}).status_code == 400
 

@@ -231,6 +231,27 @@ components:
           description: |
             data: URL or raw base64 PNG. Max 5 MB after decode. Optional;
             servers MUST accept a report without a screenshot.
+        screenshotError:
+          type: string
+          maxLength: 200
+          description: |
+            Optional. Sent by widget 1.6.0+ only when there is NO screenshot:
+            why the capture failed, in words a person can read ("capture
+            timed out after 6s"). Servers MAY store it with the report and
+            MAY ignore it; the reference backends ignore it.
+        clientKey:
+          type: string
+          maxLength: 64
+          description: |
+            Optional idempotency key, sent by widget 1.6.0+ when the app turns
+            `idempotentSubmit` on: one per open report dialog, identical on
+            every retry of that report. A server that honours it SHOULD
+            answer a repeat of a key it has already stored with that
+            report's existing `id` (200 or 201) instead of filing a second
+            row; that is what makes "Submit again" safe after a request that
+            was never answered. Servers MAY ignore it — the reference
+            backends do, so an app on them must not enable `idempotentSubmit`
+            unless its own server dedupes.
         transcript:
           type: array
           items:

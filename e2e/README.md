@@ -28,6 +28,7 @@ pytest -v
 - GET invalid id → 400; unknown valid id → 404
 - PATCH transitions write audit; same-status PATCH is a no-op
 - PATCH invalid status → 400
+- POST carrying widget 1.6.0's optional `clientKey` and `screenshotError` → still 201
 - POST with screenshot → can retrieve PNG bytes intact
 - a JPEG screenshot comes back labelled `image/jpeg`, not `image/png`
 - the served media type is sniffed from the stored bytes, not taken from the data: URL

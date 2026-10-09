@@ -58,11 +58,11 @@ load and on every resize, so it can never be restored off-screen.
 
 | Option | Default | What it does |
 |---|---|---|
-| `submitTimeoutMs` | `30000` | The POST is aborted and the dialog gives the Submit button back after this long. |
+| `submitTimeoutMs` | `30000` | The POST is aborted and the dialog gives the Submit button back after this long. A total cap, not an inactivity timer: raise it for big uploads on slow links. 0/NaN/unset = the default. |
 | `slowNoticeMs` | `8000` | After this long the status line says "Still sending…". |
-| `idempotentSubmit` | `false` | Send `clientKey` (a UUID per open dialog, the same on every retry). **Only turn this on if your server dedupes on it** (the reference backends ignore it) — it decides whether the timeout message may say "it won't be filed twice". |
+| `idempotentSubmit` | `false` | Send `clientKey` (a UUID per report: the same on every retry of unchanged text, new if the text or marks were edited). **Only turn this on if your server dedupes on it** (the reference backends ignore it) — it decides whether the timeout message may say "it won't be filed twice". |
 | `onClientEvent` | `null` | `(kind, detail) => void`, for apps that log client-side trouble. `"screenshot-failure"` (`detail.reason`, `.message`, `.ms`, `.lateMs`, `.width/.height`, `.path`, `.version`) and `"submit-timeout"` (`.elapsedMs`, `.payloadBytes`, `.idempotent`, `.message`, `.path`, `.version`). Exceptions and rejected promises from it are swallowed. leap-timesheet POSTs these to `/api/client-events`. |
-| `html2canvasUrl` | `""` | If `window.html2canvas` is absent when a screenshot is needed, inject this script on the first click and wait for it (inside `captureTimeoutMs`). Keeps ~200 KB off pages where nobody reports. Empty = never inject. |
+| `html2canvasUrl` | `""` | If `window.html2canvas` is absent when a screenshot is needed, inject this script on the first click and wait for it (inside `captureTimeoutMs`). Keeps ~200 KB off pages where nobody reports. Empty = never inject. `capture-engine.js` only wraps an html2canvas already loaded when it runs, so it is not applied to a lazily loaded one. |
 | `captureLateWatchMs` | `30000` | After a capture times out, how long to keep watching for it to finish, so the event can say how long it really took. |
 | `reachOverDialogs` | `true` | See below. `false` opts out. |
 

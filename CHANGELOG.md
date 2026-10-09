@@ -6,7 +6,9 @@ All notable changes to this monorepo.
 
 One widget for every app: leap-timesheet and the seal viewer each carried an older fork with
 features the shared widget lacked. Everything below is opt-in or backwards-compatible; an app
-that changes nothing files the same POST as 1.5.0, apart from the changes marked **visible**.
+that changes nothing files the same POST as 1.5.0, apart from the changes marked **visible**
+and one field: a report with NO screenshot now carries `screenshotError` (a server that
+rejects unknown keys would refuse exactly those reports; the reference backends ignore it).
 Spec: `clientKey` and `screenshotError` added as optional `BugCreate` fields (the reference
 backends ignore both; a contract test proves they still file the report).
 
@@ -16,8 +18,11 @@ backends ignore both; a contract test proves they still file the report).
   the dialog says the report may already be filed. Why: leap-timesheet `bug-20260911-222709`,
   where the server stored the row and answered 201 in 296 ms, the browser never acted on the
   answer, and the reporter was left on "Submitting…" for a report that had been filed. **Visible.**
-- **Idempotency** (`idempotentSubmit: true`, off by default). Sends `clientKey`, one UUID per open
-  dialog and the same on every retry, so a server that dedupes on it can return the existing
+  The timeout is a total cap on the POST, not an inactivity timer: a multi-MB upload on a very
+  slow link needs a larger `submitTimeoutMs`. A value of 0, NaN or undefined means the default.
+- **Idempotency** (`idempotentSubmit: true`, off by default). Sends `clientKey`, one UUID per
+  report (new if the text or marks change between attempts, so a deduping server cannot swallow
+  an edit; the same on every retry of unchanged text), so a server that dedupes on it can return the existing
   row; the timeout message then adds "Submit again; it won't be filed twice". Off by default
   because the reference backends ignore the key — promising "won't be filed twice" to an app
   on them would be false, so without the option the message says submitting again could file
@@ -37,6 +42,8 @@ backends ignore both; a contract test proves they still file the report).
 - **Lazy html2canvas** (`html2canvasUrl`). If `window.html2canvas` is absent when a screenshot
   is needed, the script is injected on first click and awaited inside `captureTimeoutMs`;
   quick repeats share one script, a failed load can be retried. No URL = 1.5.0 behaviour.
+  Limit: `capture-engine.js` wraps an html2canvas that is already loaded when it runs, so a
+  lazily loaded html2canvas is the plain one (the engine is not applied).
 - **Reachable over a modal `<dialog>`** (`reachOverDialogs`, default **on**; `false` opts out).
   `showModal()` makes the rest of the page inert, so the button could not be clicked in the
   one situation where someone most wants to report what they see. The widget now moves its
@@ -53,8 +60,9 @@ backends ignore both; a contract test proves they still file the report).
   half-drawn mark instead of keeping it.
 - **Fixes found on the way:** a capture that finished after its modal was closed (or closed
   and reopened) could overwrite the new modal's screenshot; a late successful submit after
-  Cancel closed whatever modal was open by then. The capture's trailing timeout is cleared
-  once it settles.
+  Cancel closed whatever modal was open by then; the viewer's Escape could also close a host
+  dialog around it. The capture's trailing timeout is cleared once it settles. The
+  `screenshot-failure` event carries the path, never the query string (which can hold tokens).
 - **`capture-engine.js`** exposes its pure parts (the "drew nothing" check and the options it
   hands html-to-image) to Node, and is unit-tested; browser behaviour is unchanged.
 - **Not ported from the forks:** timesheet's capture-first ordering (it waits for the capture

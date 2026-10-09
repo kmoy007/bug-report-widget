@@ -202,6 +202,13 @@ test("the toolbar and the viewer keep clear of a notch and the home indicator", 
   assert.match(v.root.style.cssText, /padding-bottom:env\(safe-area-inset-bottom/);
 });
 
+test("Escape closes the viewer and is consumed, so a host <dialog> around it stays open", async () => {
+  const v = await open();
+  const ev = v.doc.dispatch("keydown", { key: "Escape" });
+  assert.equal(v.doc.getElementById(widget.VIEWER_ID), null);
+  assert.equal(ev.defaultPrevented, true);
+});
+
 test("the viewer keeps its fixed id and the exclude attribute, whatever the idPrefix", async () => {
   const v = await open();
   assert.equal(v.root.id, "bug-report-viewer");

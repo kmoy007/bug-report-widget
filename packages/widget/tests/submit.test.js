@@ -121,6 +121,31 @@ test("with idempotentSubmit the timeout says it is safe to submit again, and the
   assert.equal(h.q(""), null, "the retry closes the dialog");
 });
 
+test("editing the text between attempts makes it a new report with a new key (a deduping server must not drop the edit)", async () => {
+  const keys = [];
+  const h = harness({ config: { idempotentSubmit: true }, fetchImpl: (u, init) => { keys.push(JSON.parse(init.body).clientKey); return new Promise(() => {}); } });
+  const submit = await openFilled(h, "first wording");
+  submit.click();
+  await settle(70);
+  submit.click();                                  // same text: a retry
+  await settle(70);
+  h.q("-textarea").value = "second wording";
+  submit.click();                                  // edited: not the same report
+  await settle(70);
+  assert.equal(keys.length, 3);
+  assert.equal(keys[0], keys[1]);
+  assert.notEqual(keys[1], keys[2]);
+});
+
+test("a timeout of 0, NaN or undefined means the default, not 'abort at once'", () => {
+  for (const bad of [0, NaN, undefined, -5, "soon"]) {
+    const cfg = widget.mergeConfig({ submitTimeoutMs: bad, slowNoticeMs: bad });
+    assert.equal(cfg.submitTimeoutMs, 30000, String(bad));
+    assert.equal(cfg.slowNoticeMs, 8000, String(bad));
+  }
+  assert.equal(widget.mergeConfig({ submitTimeoutMs: 90000 }).submitTimeoutMs, 90000);
+});
+
 test("a different report gets a different key", async () => {
   const h = harness({ config: { idempotentSubmit: true } });
   h.ctl.openModal();
@@ -194,6 +219,21 @@ test("Escape closes the modal and the listener goes with it", async () => {
   assert.equal(esc.defaultPrevented, true, "so a host <dialog> is not closed by the same key");
   assert.equal(h.doc.listenerCount("keydown"), 0);
   void ev;
+});
+
+test("Escape that is cancelling an IME composition does not throw the report away", async () => {
+  const h = harness();
+  h.ctl.openModal();
+  h.doc.dispatch("keydown", { key: "Escape", isComposing: true });
+  assert.ok(h.q(""));
+});
+
+test("opening a second time never leaves two Escape listeners behind", async () => {
+  const h = harness();
+  h.ctl.openModal();
+  h.q("").remove();                                 // removed by something other than closeModal
+  h.ctl.openModal();
+  assert.equal(h.doc.listenerCount("keydown"), 1);
 });
 
 test("Escape leaves the modal alone while the screenshot viewer is open (the viewer takes it)", async () => {

@@ -68,6 +68,21 @@ test("a dialog already open at mount time is handled", () => {
   assert.equal(doc.getElementById("bug-report-button").parentNode, d);
 });
 
+test("the textarea is focused again once the form has been moved into the dialog (moving drops focus)", () => {
+  const s = setup();
+  const d = s.dialog(true);
+  s.open(d);
+  s.ctl.openModal();
+  const ta = s.doc.getElementById("bug-report-modal-textarea");
+  let focused = 0;
+  ta.focus = () => { focused++; };
+  s.fire();
+  assert.equal(s.doc.getElementById("bug-report-modal").parentNode, d);
+  assert.equal(focused, 1);
+  s.fire();
+  assert.equal(focused, 1, "not again on a pass that moved nothing");
+});
+
 test("a non-modal dialog does not block the page, so nothing moves", () => {
   const s = setup();
   const d = s.dialog(false);

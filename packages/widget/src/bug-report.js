@@ -151,6 +151,12 @@
         out[k2] = user[k2];
       }
     }
+    // A timeout of 0, NaN or undefined (an unset variable) would abort every
+    // submit at once, so such values mean "the default", not "no timeout".
+    ["submitTimeoutMs", "slowNoticeMs"].forEach(function (key) {
+      var n = Number(out[key]);
+      if (!(n > 0) || !isFinite(n)) out[key] = DEFAULTS[key];
+    });
     return out;
   }
 
@@ -814,7 +820,13 @@
         zoom(p.x, p.y, e.deltaY < 0 ? 1.15 : 1 / 1.15);
       }, { passive: false });
 
-      function onKey(e) { if (e.key === "Escape") close(false); }
+      function onKey(e) {
+        if (e.key !== "Escape") return;
+        // The viewer may sit inside a host <dialog> (reachOverDialogs): without
+        // this the same Escape would also close the app's dialog underneath.
+        try { e.preventDefault && e.preventDefault(); } catch (_) {}
+        close(false);
+      }
       doc.addEventListener("keydown", onKey);
       function close(keep) {
         doc.removeEventListener("keydown", onKey);
@@ -1173,7 +1185,8 @@
 
     var capturedDataUrl = null;
     var captureError = "";          // why there is no screenshot, "" when there is one / not known yet
-    var submissionKey = null;       // idempotency key: one per open modal
+    var submissionKey = null;       // idempotency key: one per report (see onSubmit)
+    var attempt = null;             // what the last submit sent: {details, shot}
     var openSeq = 0;                // bumped on every open and close: stale async work checks it
     var modalId = cfg.idPrefix + "-modal";
     var btnId = cfg.idPrefix + "-button";
@@ -1235,7 +1248,7 @@
     function closeModal() {
       openSeq++;
       capturedDataUrl = null; originalDataUrl = null; markStrokes = [];
-      captureError = ""; submissionKey = null;
+      captureError = ""; submissionKey = null; attempt = null;
       removeById(deps.document, modalId);
       if (escHandler) {
         deps.document.removeEventListener && deps.document.removeEventListener("keydown", escHandler);
@@ -1254,8 +1267,9 @@
         if (f.reason === "timeout") {
           parts.push(lateMs == null ? "render never finished" : "render finished after " + Math.round(lateMs) + "ms");
         }
+        // The path only: a query string can hold tokens or personal data, and
+        // this goes wherever the app's hook sends it. The app can add more.
         var loc = (win && win.location) || {};
-        if (loc.search) parts.push("page " + String(loc.search).slice(0, 60));
         var de = doc && doc.documentElement;
         if (de && de.clientWidth) parts.push("viewport " + de.clientWidth + "x" + de.clientHeight + "@" + ((win && win.devicePixelRatio) || 1));
         if (f.width) parts.push("canvas " + f.width + "x" + f.height);
@@ -1314,6 +1328,13 @@
         return;
       }
       ui.showError(null);
+      // One key per REPORT. If the reporter changed the text (or the marks)
+      // since the last attempt, this is no longer the same report, and reusing
+      // the key would let a deduping server answer with the old row and
+      // silently drop the edit.
+      var trimmed = description.trim();
+      if (attempt && (attempt.details !== trimmed || attempt.shot !== capturedDataUrl)) submissionKey = newClientKey(win);
+      attempt = { details: trimmed, shot: capturedDataUrl };
       var body = buildPostBody({
         details: description.trim(),
         screenshot: capturedDataUrl,
@@ -1387,6 +1408,7 @@
       if (deps.document.getElementById(modalId)) return;  // re-entry guard
       var mySeq = ++openSeq;
       submissionKey = newClientKey(win);
+      attempt = null;
       captureError = "";
 
       var overlay = buildModal(deps.document, cfg, {
@@ -1395,8 +1417,10 @@
       });
       deps.document.body.appendChild(overlay);
 
+      if (escHandler && deps.document.removeEventListener) deps.document.removeEventListener("keydown", escHandler);
       escHandler = function (e) {
         if (!e || e.key !== "Escape") return;
+        if (e.isComposing) return;                              // Escape cancelling an IME composition, not the dialog
         if (deps.document.getElementById(VIEWER_ID)) return;   // the viewer's Escape, not ours
         try { e.preventDefault && e.preventDefault(); } catch (_) {}   // and not the host dialog's
         closeModal();
@@ -1445,10 +1469,20 @@
       var doc = deps.document;
       if (!doc || !doc.body) return;
       var host = topModalDialog(doc) || doc.body;
+      var movedModal = false;
       [btnId, modalId, VIEWER_ID, toastId].forEach(function (id) {
         var n = doc.getElementById(id);
-        if (n && n.parentNode !== host) host.appendChild(n);
+        if (n && n.parentNode !== host) {
+          host.appendChild(n);
+          if (id === modalId) movedModal = true;
+        }
       });
+      // openModal focused the textarea while the form was still outside the
+      // dialog (inert), and moving a node drops focus: give it back.
+      if (movedModal) {
+        var ta = doc.getElementById(modalId + "-textarea");
+        if (ta && ta.focus) try { ta.focus(); } catch (_) {}
+      }
     }
     function keepReachable() {
       if (reachableStarted || cfg.reachOverDialogs === false) return;
@@ -1466,9 +1500,10 @@
           (rec.removedNodes ? Array.prototype.slice.call(rec.removedNodes) : []).forEach(function (n) {
             if (!n || n.nodeType !== 1 || !n.querySelector) return;
             [btnId, modalId, VIEWER_ID, toastId].forEach(function (id) {
+              if (doc.getElementById(id)) return;   // still attached: nothing to rescue, skip the subtree walk
               var inside = null;
               try { inside = n.querySelector('[id="' + id + '"]'); } catch (e) {}
-              if (inside && !doc.getElementById(id)) doc.body.appendChild(inside);
+              if (inside) doc.body.appendChild(inside);
             });
           });
         });

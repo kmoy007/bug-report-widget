@@ -186,7 +186,9 @@ test("the modal says why there is no screenshot, the POST carries it, and the ap
   assert.equal(h.events.length, 1);
   assert.equal(h.events[0].k, "screenshot-failure");
   assert.equal(h.events[0].d.reason, "blank");
-  assert.match(h.events[0].d.message, /^capture came back blank; page \?tab=review/);
+  assert.match(h.events[0].d.message, /^capture came back blank/);
+  assert.equal(h.events[0].d.path, "/a");
+  assert.doesNotMatch(JSON.stringify(h.events[0].d), /tab=review/, "the query string can hold tokens: it is never sent to the hook");
 });
 
 test("a timeout event waits for the late render and reports how long it took", async () => {

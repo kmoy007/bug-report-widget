@@ -674,7 +674,13 @@
       var stage = el("div", "flex:1;position:relative;overflow:hidden;touch-action:none");
       var layer = el("div", "position:absolute;left:0;top:0;transform-origin:0 0;background:#fff;" +
         "width:" + W + "px;height:" + H + "px");
-      img.style.cssText = "position:absolute;left:0;top:0;width:" + W + "px;height:" + H + "px;display:block";
+      // An <img> a mouse drags over starts the browser's own image drag, which
+      // cancels the pointer stream: no stroke ever registers (found in 1.6.0 by
+      // a real-browser test). The marks canvas is above it anyway; the stage
+      // takes the events.
+      img.draggable = false;
+      img.style.cssText = "position:absolute;left:0;top:0;width:" + W + "px;height:" + H + "px;display:block;" +
+        "pointer-events:none;user-select:none;-webkit-user-drag:none";
       var ov = el("canvas", "position:absolute;left:0;top:0;pointer-events:none");
       ov.width = W; ov.height = H;
       layer.appendChild(img); layer.appendChild(ov);
@@ -741,6 +747,7 @@
         panFrom = null;
       }
 
+      stage.addEventListener("dragstart", function (e) { e.preventDefault(); });
       stage.addEventListener("pointerdown", function (e) {
         var id = e.pointerId;
         if (tool !== "move") {

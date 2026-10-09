@@ -215,3 +215,10 @@ test("the viewer keeps its fixed id and the exclude attribute, whatever the idPr
   assert.equal(v.root.getAttribute("data-bug-report-exclude"), "true");
   assert.ok(v.btn("done") && v.btn("move"), "toolbar button ids hang off the same id");
 });
+
+test("the image cannot be natively dragged (that cancels every mouse stroke)", async () => {
+  const v = await open();
+  assert.equal(v.img.draggable, false);
+  assert.match(v.img.style.cssText, /pointer-events:none/);
+  assert.match(v.img.style.cssText, /user-drag:none/);
+});

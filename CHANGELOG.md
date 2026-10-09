@@ -2,6 +2,14 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.1 — 2026-10-09
+
+- **Fix: pen and box did nothing with a mouse in 1.6.0.** The 1.6.0 viewer shows the screenshot
+  in an `<img>`, and dragging over an image starts the browser's native image drag, which cancels
+  the pointer stream — no stroke ever registered (zoom still worked, so it looked half-alive).
+  Found by StoppageViewer's real-browser markup test, which fails on 1.6.0 and passes on this.
+  The image is now non-draggable with `pointer-events:none`. Anyone on 1.6.0 should take 1.6.1.
+
 ## widget v1.6.0 — 2026-10-08
 
 One widget for every app: leap-timesheet and the seal viewer each carried an older fork with

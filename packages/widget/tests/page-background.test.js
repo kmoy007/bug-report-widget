@@ -68,6 +68,19 @@ test("blank: judged against the page colour: a dark page that drew nothing is bl
   assert.equal(pure.blank(canvas(100, 80, dark)), false, "default is white");
 });
 
+// <noscript> (1.6.2): the clone is rendered without scripting, so its fallback content shows
+test("filter: <noscript> and <template> are not drawn; ordinary elements and text are", () => {
+  const f = pure.toImageOptions({}).filter;
+  const node = (nodeName) => ({ nodeType: 1, nodeName, id: "", getBoundingClientRect: () => ({ top: 0 }) });
+  assert.equal(f(node("NOSCRIPT")), false);
+  assert.equal(f(node("TEMPLATE")), false);
+  assert.equal(f(node("noscript")), false, "case-insensitive");
+  assert.equal(f(node("DIV")), true);
+  assert.equal(f(node("BUTTON")), true);
+  assert.equal(f({ nodeType: 3 }), true);
+  assert.equal(pure.neverShown({ nodeType: 3, nodeName: "#text" }), false);
+});
+
 test("wrapper: a dark page hands html-to-image its real colour, and the fallback gets it too", async () => {
   let got, fallbackOpts;
   global.document = { body: BODY, documentElement: HTML };

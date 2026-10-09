@@ -15,6 +15,11 @@ All notable changes to this monorepo.
   colour, and the html2canvas fallback receives it too. Pure `pageBackground` is exported for
   tests. `encodeCanvasUnderCap` is unchanged: engine canvases are already opaque, so its white
   flatten under JPEG is a no-op for them.
+- **Fix: `<noscript>` fallback content appeared in screenshots.** html-to-image renders the
+  clone as an SVG image without scripting, which displays `<noscript>` content, so the daily
+  report's no-JS fallback form showed up as a raw `<button type="submit" ...>go</button>` next to
+  the live controls. The capture filter now skips `<noscript>` and `<template>` (inert, never
+  shown); pure `neverShown` is exported for tests.
 
 ## widget v1.6.1 — 2026-10-09
 

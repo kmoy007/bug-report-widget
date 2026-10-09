@@ -89,6 +89,17 @@
     } catch (e) { return false; }
   }
 
+  // Elements whose content the live page does not show but a capture would:
+  // html-to-image renders the clone as an SVG image WITHOUT scripting, where
+  // <noscript> fallback content is displayed (as raw text, e.g. a stray
+  // "<button ...>go</button>"). <template> content is inert and never shown.
+  // Pure: takes anything with nodeType and nodeName.
+  function neverShown(n) {
+    if (!n || n.nodeType !== 1) return false;
+    var name = String(n.nodeName || n.tagName || "").toUpperCase();
+    return name === "NOSCRIPT" || name === "TEMPLATE";
+  }
+
   // The options html-to-image gets for a given html2canvas-style call. Pure.
   function toImageOptions(opts, bg) {
     opts = opts || {};
@@ -98,6 +109,7 @@
       backgroundColor: bg || "#ffffff",
       filter: function (n) {
         if (n.nodeType !== 1) return true;
+        if (neverShown(n)) return false;
         if (opts.ignoreElements && opts.ignoreElements(n)) return false;
         // The cost is per node, and a busy day is thousands of them. Anything
         // that starts below the visible area cannot move what is above it, so
@@ -119,7 +131,7 @@
   // Node (the unit tests) has no window: expose the pure parts and stop.
   if (typeof window === "undefined") {
     if (typeof module === "object" && module.exports) module.exports = { blank: blank, toImageOptions: toImageOptions,
-      pageBackground: pageBackground, parseColor: parseColor };
+      pageBackground: pageBackground, parseColor: parseColor, neverShown: neverShown };
     return;
   }
   var real = window.html2canvas, h2i = window.htmlToImage;

@@ -137,6 +137,11 @@ in front of it, with html2canvas as the fallback:
 <script src="/static/bug-report.js" defer></script>
 ```
 
+The screenshot is drawn on the page's own background: the first opaque computed
+`background-color` of `<body>`, then `<html>` (white if neither is opaque; the browser's dark
+canvas colour if the page declares `color-scheme: dark`). Gradients and images are not rendered,
+so a page whose background is only a gradient gets its nearest opaque colour.
+
 Its cost is per DOM node, so a very large page wants `captureTimeoutMs: 20000` in
 `BugReportConfig`. It does not draw `<video>` frames or iframe content (nor does html2canvas).
 

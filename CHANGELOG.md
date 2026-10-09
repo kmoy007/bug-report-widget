@@ -2,6 +2,20 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.2 — 2026-10-09
+
+- **Fix: dark pages were screenshotted on white.** `capture-engine.js` painted every capture on
+  `#ffffff` (and html2canvas got a transparent background that the encoder later flattened onto
+  white), so a dark-themed page (light text on a dark body, found on the fleet dashboard) came
+  out as near-invisible light-on-white text. The engine now uses the page's real background:
+  the first opaque computed `background-color` of `<body>` then `<html>`, else the browser's dark
+  canvas colour for `color-scheme: dark`, else white (light pages are unchanged). Colours with
+  alpha below 1 and gradients over a transparent colour count as not opaque: gradients are not
+  rendered, the nearest opaque colour is used. The "drew nothing" check compares against that
+  colour, and the html2canvas fallback receives it too. Pure `pageBackground` is exported for
+  tests. `encodeCanvasUnderCap` is unchanged: engine canvases are already opaque, so its white
+  flatten under JPEG is a no-op for them.
+
 ## widget v1.6.1 — 2026-10-09
 
 - **Fix: pen and box did nothing with a mouse in 1.6.0.** The 1.6.0 viewer shows the screenshot

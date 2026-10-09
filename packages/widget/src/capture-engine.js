@@ -21,31 +21,81 @@
 (function () {
   "use strict";
 
-  // The canvas is filled white first, so "drew nothing" means all white, not
-  // transparent. Same 8x8 sample as the widget's own isBlankCanvas. Pure (takes
-  // anything with width, height and getContext("2d").getImageData), so it is
-  // unit-tested in Node. Unreadable (tainted) counts as NOT blank: the fallback
-  // to html2canvas would not read it any better.
-  function blank(c) {
+  // A computed css colour as [r, g, b, a] (a in 0..1), or null if it is not one
+  // of the simple forms a browser reports: rgb()/rgba() with commas or spaces
+  // and an optional "/ alpha", color(srgb r g b / a), #rgb/#rrggbb, "transparent".
+  function parseColor(s) {
+    if (typeof s !== "string") return null;
+    s = s.trim().toLowerCase();
+    if (s === "transparent") return [0, 0, 0, 0];
+    var m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(s);
+    if (m) {
+      var h = m[1].length === 3 ? m[1].replace(/./g, "$&$&") : m[1];
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), 1];
+    }
+    m = /^(rgba?|color\(srgb)\s*\(?([^)]*)\)$/.exec(s);
+    if (!m) return null;
+    var parts = m[2].split(/[\s,\/]+/).filter(Boolean);
+    if (parts.length !== 3 && parts.length !== 4) return null;
+    var v = parts.map(function (x) {
+      return /%$/.test(x) ? parseFloat(x) / 100 : parseFloat(x);
+    });
+    if (v.some(isNaN)) return null;
+    var srgb = m[1] !== "rgb" && m[1] !== "rgba";
+    var rgb = [0, 1, 2].map(function (i) {
+      var n = srgb || /%$/.test(parts[i]) ? v[i] * 255 : v[i];
+      return Math.max(0, Math.min(255, Math.round(n)));
+    });
+    return [rgb[0], rgb[1], rgb[2], v.length === 4 ? Math.max(0, Math.min(1, v[3])) : 1];
+  }
+
+  // The colour the person SEES behind the page: the first fully opaque computed
+  // background-color walking body, then the root element (a canvas paints the
+  // root's background behind everything). A colour with alpha below 1, a
+  // gradient/image over a transparent colour, or something unparseable is not
+  // opaque, so it is skipped: we do not render gradients. Neither opaque: a page
+  // that asks for a dark colour-scheme gets the browser's dark canvas colour,
+  // anything else white (what every capture was before 1.6.2). Pure: `gcs` is
+  // getComputedStyle-like, returning backgroundColor and colorScheme.
+  function pageBackground(gcs, body, docEl) {
+    var els = [body, docEl];
+    for (var i = 0; i < els.length; i++) {
+      if (!els[i]) continue;
+      var c = parseColor((gcs(els[i]) || {}).backgroundColor);
+      if (c && c[3] === 1) return "rgb(" + c[0] + ", " + c[1] + ", " + c[2] + ")";
+    }
+    var scheme = String(((docEl && gcs(docEl)) || {}).colorScheme || "").toLowerCase();
+    if (/\bdark\b/.test(scheme) && !/\blight\b/.test(scheme)) return "#121212";
+    return "#ffffff";
+  }
+
+  // The canvas is filled with the page colour first (bg, default white), so
+  // "drew nothing" means all that colour, not transparent. Same 8x8 sample as
+  // the widget's own isBlankCanvas. Pure (takes anything with width, height and
+  // getContext("2d").getImageData), so it is unit-tested in Node. Unreadable
+  // (tainted) counts as NOT blank: the fallback to html2canvas would not read
+  // it any better.
+  function blank(c, bg) {
+    var want = parseColor(bg || "#ffffff") || [255, 255, 255, 1];
     try {
       var ctx = c.getContext("2d"), n = 8;
       for (var x = 0; x < n; x++) for (var y = 0; y < n; y++) {
         var px = Math.min(c.width - 1, Math.floor((x + 0.5) * c.width / n));
         var py = Math.min(c.height - 1, Math.floor((y + 0.5) * c.height / n));
         var d = ctx.getImageData(px, py, 1, 1).data;
-        if (!(d[0] === 255 && d[1] === 255 && d[2] === 255)) return false;
+        if (!(d[0] === want[0] && d[1] === want[1] && d[2] === want[2])) return false;
       }
       return true;
     } catch (e) { return false; }
   }
 
   // The options html-to-image gets for a given html2canvas-style call. Pure.
-  function toImageOptions(opts) {
+  function toImageOptions(opts, bg) {
     opts = opts || {};
     var o = {
       pixelRatio: opts.scale || 1,
       cacheBust: false,
-      backgroundColor: "#ffffff",
+      backgroundColor: bg || "#ffffff",
       filter: function (n) {
         if (n.nodeType !== 1) return true;
         if (opts.ignoreElements && opts.ignoreElements(n)) return false;
@@ -68,7 +118,8 @@
 
   // Node (the unit tests) has no window: expose the pure parts and stop.
   if (typeof window === "undefined") {
-    if (typeof module === "object" && module.exports) module.exports = { blank: blank, toImageOptions: toImageOptions };
+    if (typeof module === "object" && module.exports) module.exports = { blank: blank, toImageOptions: toImageOptions,
+      pageBackground: pageBackground, parseColor: parseColor };
     return;
   }
   var real = window.html2canvas, h2i = window.htmlToImage;
@@ -102,12 +153,19 @@
 
   window.html2canvas = function (el, opts) {
     opts = opts || {};
-    var o = toImageOptions(opts);
+    var bg = "#ffffff";
+    try { bg = pageBackground(getComputedStyle, document.body, document.documentElement); } catch (e) { /* white */ }
+    var o = toImageOptions(opts, bg);
     var unpin = pinSvgStyles(el);
     return h2i.toCanvas(el, o).then(function (c) {
       unpin();
-      if (blank(c)) throw new Error("blank");
+      if (blank(c, bg)) throw new Error("blank");
       return c;
-    }).catch(function () { unpin(); return real(el, opts); });
+    }).catch(function () {
+      unpin();
+      // html2canvas gets the page colour too, instead of transparent
+      var ro = opts.backgroundColor == null ? Object.assign({}, opts, { backgroundColor: bg }) : opts;
+      return real(el, ro);
+    });
   };
 })();

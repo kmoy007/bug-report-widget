@@ -324,8 +324,8 @@
     // rather than filing a second one, which is what makes "Submit again"
     // safe after a submit that was never answered. Sent only when asked for.
     if (opts.clientKey) body.clientKey = String(opts.clientKey).slice(0, 64);
-    // Why there is no screenshot, when there isn't one.
-    if (!body.screenshot && opts.screenshotError) body.screenshotError = String(opts.screenshotError).slice(0, 200);
+    // Why there is no screenshot, or why part of it is blank (1.6.4).
+    if (opts.screenshotError) body.screenshotError = String(opts.screenshotError).slice(0, 200);
     return body;
   }
 
@@ -411,7 +411,11 @@
   // — {left: 0, top: 0} for a viewport-cropped capture, doc.body's rect for
   // a full-body capture — so frame rects (which getBoundingClientRect always
   // reports viewport-relative) land at the right canvas position either way.
-  function compositeIframes(html2canvas, doc, canvas, scale, origin) {
+  // `missed` (optional array) collects why each same-origin frame could not be
+  // drawn: the capture still succeeds, but must not claim the frame is in it.
+  function compositeIframes(html2canvas, doc, canvas, scale, origin, missed) {
+    missed = missed || [];
+    function miss(e) { missed.push(String((e && e.message) || e || "unknown error").slice(0, 120)); }
     var frames;
     try { frames = Array.prototype.slice.call(doc.querySelectorAll("iframe")); }
     catch (e) { return Promise.resolve(canvas); }
@@ -445,8 +449,8 @@
           var x = (j.rect.left - origin.left) * scale;
           var y = (j.rect.top - origin.top) * scale;
           ctx.drawImage(sub, x, y, j.rect.width * scale, j.rect.height * scale);
-        } catch (e) { /* one bad frame must not lose the whole screenshot */ }
-      }).catch(function () { /* same */ });
+        } catch (e) { miss(e); }   // one bad frame must not lose the whole screenshot
+      }).catch(miss);
     })).then(function () { return canvas; });
   }
 
@@ -492,9 +496,21 @@
     }
   }
 
+  // One line for a capture that worked but could not draw some same-origin frames, or
+  // "" when nothing is missing. Shown in the dialog and sent as screenshotError.
+  function describePartialCapture(r) {
+    var n = (r && r.framesMissed) || 0;
+    if (!n) return "";
+    // "may be": html-to-image (capture-engine.js) draws same-origin frames itself,
+    // so a frame whose separate render failed can still be in the picture.
+    return (n === 1 ? "1 embedded frame" : n + " embedded frames") + " may be missing from the screenshot"
+      + (r.frameError ? " (" + r.frameError + ")" : "");
+  }
+
   // Same capture as captureScreenshot, but says WHY when there is no image.
   // Always resolves { dataUrl, reason, detail, ms, width, height, late }:
-  //   success  → dataUrl set, reason null
+  //   success  → dataUrl set, reason null; framesMissed + frameError when a
+  //              same-origin frame could not be drawn into it (1.6.4)
   //   failure  → dataUrl null, reason one of no-library | timeout |
   //              render-error | blank | encode-error | too-large | tainted
   // On a timeout, `late` is a promise of the render's real duration in ms (null
@@ -530,7 +546,11 @@
         if (result.ms == null) result.ms = now() - startedAt;
         resolve(result);
       }
-      function ok(dataUrl) { finish({ dataUrl: dataUrl, reason: null }); }
+      function ok(dataUrl, missed) {
+        var r = { dataUrl: dataUrl, reason: null };
+        if (missed && missed.length) { r.framesMissed = missed.length; r.frameError = missed[0]; }
+        finish(r);
+      }
       function fail(reason, extra) {
         var r = { dataUrl: null, reason: reason };
         if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) r[k] = extra[k];
@@ -612,7 +632,8 @@
               ? { left: 0, top: 0 }
               : doc.body.getBoundingClientRect();
             // paste any same-origin iframe content in before serialising
-            return compositeIframes(html2canvas, doc, canvas, scale, origin).then(function (merged) {
+            var missed = [];
+            return compositeIframes(html2canvas, doc, canvas, scale, origin, missed).then(function (merged) {
               markFinished();
               try {
                 var size = { width: merged && merged.width, height: merged && merged.height };
@@ -621,7 +642,7 @@
                 if (state !== "ok") { fail("blank", size); return; }
                 var diag = {};
                 var url = encodeCanvasUnderCap(merged, cfg.maxScreenshotBytes || DEFAULTS.maxScreenshotBytes, doc, diag);
-                if (url) { ok(url); return; }
+                if (url) { ok(url, missed); return; }
                 if (diag.tainted) { fail("tainted", size); return; }
                 if (diag.error) { size.detail = String(diag.error).slice(0, 160); fail("encode-error", size); return; }
                 fail("too-large", size);
@@ -1262,7 +1283,7 @@
     };
 
     var capturedDataUrl = null;
-    var captureError = "";          // why there is no screenshot, "" when there is one / not known yet
+    var captureError = "";          // why there is no screenshot, or why part of it may be missing; "" otherwise
     var submissionKey = null;       // idempotency key: one per report (see onSubmit)
     var attempt = null;             // what the last submit sent: {details, shot}
     var openSeq = 0;                // bumped on every open and close: stale async work checks it
@@ -1519,7 +1540,7 @@
         if (mySeq !== openSeq || !deps.document.getElementById(modalId)) return;
         var dataUrl = r.dataUrl;
         capturedDataUrl = dataUrl; originalDataUrl = dataUrl; markStrokes = [];
-        captureError = dataUrl ? "" : describeCaptureFailure(r);
+        captureError = dataUrl ? describePartialCapture(r) : describeCaptureFailure(r);
         if (dataUrl) {
           if (previewEl) {
             previewEl.src = dataUrl; previewEl.style.display = "block";
@@ -1531,7 +1552,7 @@
               });
             }
           }
-          if (hintEl) { hintEl.textContent = "Screenshot captured."; }
+          if (hintEl) { hintEl.textContent = captureError ? "Screenshot captured, but " + captureError + "." : "Screenshot captured."; }
         } else {
           if (hintEl) { hintEl.textContent = "Screenshot unavailable (" + captureError + ") — you can still submit text."; }
         }
@@ -1658,6 +1679,7 @@
     captureScreenshot: captureScreenshot,
     captureScreenshotDetailed: captureScreenshotDetailed,
     describeCaptureFailure: describeCaptureFailure,
+    describePartialCapture: describePartialCapture,
     openViewer: function (src, opts) {
       return openViewer({ document: document, window: window }, src, opts);
     },

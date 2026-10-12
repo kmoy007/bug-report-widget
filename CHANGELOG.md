@@ -2,6 +2,19 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.4 — 2026-10-12
+
+- **Fix: a same-origin frame that could not be drawn left a blank rectangle in a screenshot that
+  said "Screenshot captured."** The frame step swallowed every frame's render or paste error so
+  one bad frame would not lose the whole capture — right — but it said nothing, so a framed page
+  (LeapHQ's plug-ins, PlacementImageViewer's Investigate overlay) could be filed blank with no
+  word of it (found reviewing leap-timesheet#429). The capture still succeeds, and now says so:
+  the dialog reads "Screenshot captured, but 1 embedded frame may be missing from the screenshot (…)" ("may":
+  html-to-image draws same-origin frames itself, so the frame can still be there), and the same
+  line is sent as `screenshotError` beside the screenshot (the spec now allows
+  that; servers may ignore it, as the reference backends do). `captureScreenshotDetailed` adds
+  `framesMissed` and `frameError` to a successful result; pure `describePartialCapture` is exported.
+
 ## widget v1.6.3 — 2026-10-12
 
 - **Fix: a page using `color-mix()` (or `color()`, `oklch()`, `lab()`…) could not be screenshotted.**

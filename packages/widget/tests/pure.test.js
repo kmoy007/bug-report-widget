@@ -213,8 +213,44 @@ test("captureScreenshot: a failing iframe render does not lose the screenshot", 
     },
     document: doc,
   };
-  const out = await widget.captureScreenshot(fake, { ...widget.DEFAULTS, captureTimeoutMs: 2000 });
-  assert.equal(out, "data:image/png;base64,MERGED", "parent capture must survive");
+  const r = await widget.captureScreenshotDetailed(fake, { ...widget.DEFAULTS, captureTimeoutMs: 2000 });
+  assert.equal(r.dataUrl, "data:image/png;base64,MERGED", "parent capture must survive");
+  // ...but it must not pass for whole: the frame is blank in it (1.6.4)
+  assert.equal(r.framesMissed, 1);
+  assert.equal(r.frameError, "inner boom");
+});
+
+test("captureScreenshotDetailed: a frame that renders but cannot be pasted counts as missed", async () => {
+  const inner = { body: { tag: "inner" } };
+  const doc = {
+    body: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
+    querySelectorAll: () => [fakeIframe({ left: 0, top: 0, width: 10, height: 10 }, inner)],
+  };
+  const page = fakeCanvas([]);
+  const ctx = page.getContext();
+  page.getContext = () => Object.assign({}, ctx, { drawImage: () => { throw new Error("paste boom"); } });
+  const fake = { html2canvas: (el) => Promise.resolve(el === inner.body ? fakeCanvas([]) : page), document: doc };
+  const r = await widget.captureScreenshotDetailed(fake, { ...widget.DEFAULTS, captureTimeoutMs: 2000 });
+  assert.equal(r.dataUrl, "data:image/png;base64,MERGED");
+  assert.deepEqual([r.framesMissed, r.frameError], [1, "paste boom"]);
+});
+
+test("captureScreenshotDetailed: frames it never tries are not counted as missed", async () => {
+  const hostile = {
+    get contentDocument() { throw new Error("cross-origin"); },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 50, height: 50 }),
+    getAttribute: () => null,
+  };
+  const excluded = fakeIframe({ left: 0, top: 0, width: 50, height: 50 }, { body: {} }, { "data-bug-report-exclude": "" });
+  const empty = fakeIframe({ left: 0, top: 0, width: 0, height: 0 }, { body: {} });
+  const doc = {
+    body: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
+    querySelectorAll: () => [hostile, excluded, empty],
+  };
+  const fake = { html2canvas: () => Promise.resolve(fakeCanvas([])), document: doc };
+  const r = await widget.captureScreenshotDetailed(fake, { ...widget.DEFAULTS, captureTimeoutMs: 2000 });
+  assert.equal(r.dataUrl, "data:image/png;base64,MERGED");
+  assert.equal("framesMissed" in r, false);
 });
 
 test("DEFAULTS exposes a configurable buttonSize", () => {

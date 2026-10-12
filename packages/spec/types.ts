@@ -25,7 +25,7 @@ export interface BugCreate {
   metaBuildSha?: string;
   /** data: URL or raw base64 image (PNG or JPEG). ≤ 5 MB decoded. */
   screenshot?: string;
-  /** Why there is no screenshot (widget 1.6.0+, only sent without one). ≤ 200 chars. */
+  /** Why there is no screenshot (widget 1.6.0+), or why part of it may be missing (1.6.4+). ≤ 200 chars. */
   screenshotError?: string;
   /** Idempotency key (widget 1.6.0+, opt-in): the same on every retry of one report. ≤ 64 chars. */
   clientKey?: string;

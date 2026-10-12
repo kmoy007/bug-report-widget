@@ -145,6 +145,29 @@ so a page whose background is only a gradient gets its nearest opaque colour.
 Its cost is per DOM node, so a very large page wants `captureTimeoutMs: 20000` in
 `BugReportConfig`. It does not draw `<video>` frames or iframe content (nor does html2canvas).
 
+## Known gaps (as of 1.6.2)
+
+Found while rolling the widget out to seven apps (2026-10-09/12). Not bugs worth blocking on; each is
+a real edge a later version should close.
+
+- **A new `clientKey` is minted if the screenshot arrives after the first submit attempt** (it counts as
+  a changed report). With `idempotentSubmit` on, a stalled first submit sent before the capture finished,
+  followed by a retry, can file twice. Consumers' e2e wait for the capture first.
+- **`reachOverDialogs` moves the button, modal and viewer into an open modal `<dialog>`.** If that dialog
+  has a CSS `transform`, `position: fixed` children are positioned against the dialog, not the viewport.
+  Proven in a real browser only for apps without a transformed dialog (seal viewer, timesheet).
+- **The 30 s submit timeout is a total cap, not an inactivity timer** (a slow but progressing upload
+  of a big screenshot can still hit it; raise `submitTimeoutMs`).
+- **The capture engine draws neither `<video>` frames nor iframe content** (html2canvas did not either).
+  CCTV panes and embedded frames come out blank in a screenshot.
+- **The capture engine's cost is per DOM node.** It skips everything below the fold, but a page scrolled
+  far down still clones everything above; raise `captureTimeoutMs` (the apps use 20000).
+- **A capture in a hidden browser tab stalls** (Chrome throttles rendering) and ends in "capture timed out".
+  Nothing to fix; know it when testing with automation.
+- **No browser test in this repo.** Drawing, dialog reparenting and pinch-zoom are proven only by the
+  consuming apps' Playwright suites (stoppageviewer's is the reference); the Node tests cover the maths,
+  the filing path and the capture engine's pure parts.
+
 ## Opting elements out of capture
 
 Mark any DOM element with `data-bug-report-exclude` and html2canvas will skip it:

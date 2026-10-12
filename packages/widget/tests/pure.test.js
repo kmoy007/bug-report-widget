@@ -168,14 +168,16 @@ test("captureScreenshot: composites a same-origin iframe into the capture", asyn
     body: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
     querySelectorAll: () => [fakeIframe({ left: 10, top: 20, width: 80, height: 40 }, inner)],
   };
-  const seen = [];
+  const seen = [], hooks = new Map();
   const fake = {
-    html2canvas: (el, opts) => { seen.push(el); return Promise.resolve(fakeCanvas(drawn)); },
+    html2canvas: (el, opts) => { seen.push(el); hooks.set(el, opts.onclone); return Promise.resolve(fakeCanvas(drawn)); },
     document: doc,
   };
   const out = await widget.captureScreenshot(fake, { ...widget.DEFAULTS, captureTimeoutMs: 2000 });
   assert.equal(out, "data:image/png;base64,MERGED");
   assert.ok(seen.includes(inner.body), "inner iframe body was never rendered");
+  // a frame's color-mix() would otherwise fail its render, which is swallowed: a blank frame, no reason
+  assert.equal(hooks.get(inner.body), widget.plainColorsInClone, "the frame's render has no colour hook");
   assert.equal(drawn.length, 1, "iframe canvas was not pasted into the parent");
 });
 

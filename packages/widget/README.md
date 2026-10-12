@@ -145,7 +145,16 @@ so a page whose background is only a gradient gets its nearest opaque colour.
 Its cost is per DOM node, so a very large page wants `captureTimeoutMs: 20000` in
 `BugReportConfig`. It does not draw `<video>` frames or iframe content (nor does html2canvas).
 
-## Known gaps (as of 1.6.2)
+## Modern colour functions
+
+html2canvas 1.4.1 throws on any colour function newer than `rgb()`/`hsl()`, and browsers report a
+`color-mix()` result as `color(srgb …)`, so one tinted badge used to fail the whole capture
+("Attempting to parse an unsupported color function \"color\""). Since 1.6.3 the widget hands
+html2canvas an `onclone` hook that rewrites every `color()`, `color-mix()`, `oklch()`, `oklab()`,
+`lab()`, `lch()` and `hwb()` value in the cloned page as the `rgba()` the browser itself resolves it
+to, `::before`/`::after` included.
+
+## Known gaps (as of 1.6.3)
 
 Found while rolling the widget out to seven apps (2026-10-09/12). Not bugs worth blocking on; each is
 a real edge a later version should close.
@@ -164,6 +173,9 @@ a real edge a later version should close.
   far down still clones everything above; raise `captureTimeoutMs` (the apps use 20000).
 - **A capture in a hidden browser tab stalls** (Chrome throttles rendering) and ends in "capture timed out".
   Nothing to fix; know it when testing with automation.
+- **Only a fixed list of colour properties is rewritten** (`color`, backgrounds, borders, outline, text
+  decoration and stroke, shadows, `fill`/`stroke`, `list-style-image`): the ones html2canvas reads, and a few
+  more. A colour function nested more than one level deep inside another is left as it was.
 - **No browser test in this repo.** Drawing, dialog reparenting and pinch-zoom are proven only by the
   consuming apps' Playwright suites (stoppageviewer's is the reference); the Node tests cover the maths,
   the filing path and the capture engine's pure parts.

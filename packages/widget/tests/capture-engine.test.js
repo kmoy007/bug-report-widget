@@ -96,6 +96,15 @@ test("wrapper: a render that throws falls back to the real html2canvas, with the
   } finally { uninstall(); }
 });
 
+test("wrapper: when the fallback fails too, the error says why html-to-image failed first", async () => {
+  const h2c = install({ toCanvas: () => Promise.reject(new Error("image load timed out")) },
+                      () => Promise.reject(new Error('Attempting to parse an unsupported color function "color"')));
+  try {
+    await assert.rejects(h2c(el, {}), (e) => /unsupported color function/.test(e.message)
+      && /after html-to-image: image load timed out/.test(e.message));
+  } finally { uninstall(); }
+});
+
 test("wrapper: not installed when either library is missing", () => {
   const real = () => {};
   global.window = { html2canvas: real };

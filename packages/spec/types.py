@@ -29,7 +29,7 @@ class BugCreate(TypedDict, total=False):
     metaUserAgent: str
     metaBuildSha: str
     screenshot: str  # data URL or raw base64
-    screenshotError: str  # why there is no screenshot (widget 1.6.0+); <= 200 chars
+    screenshotError: str  # why there is no screenshot (1.6.0+), or why part of it is blank (1.6.4+); <= 200 chars
     clientKey: str  # idempotency key (widget 1.6.0+, opt-in); <= 64 chars
     transcript: list[TranscriptTurn]
 

@@ -235,10 +235,12 @@ components:
           type: string
           maxLength: 200
           description: |
-            Optional. Sent by widget 1.6.0+ only when there is NO screenshot:
-            why the capture failed, in words a person can read ("capture
-            timed out after 6s"). Servers MAY store it with the report and
-            MAY ignore it; the reference backends ignore it.
+            Optional. Sent by widget 1.6.0+ when there is NO screenshot: why
+            the capture failed, in words a person can read ("capture timed
+            out after 6s"). Since 1.6.4 also sent WITH a screenshot when part
+            of it may be missing ("1 embedded frame may be missing from the screenshot
+            (…)"). Servers MAY store it with the report and MAY ignore
+            it; the reference backends ignore it.
         clientKey:
           type: string
           maxLength: 64

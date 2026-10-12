@@ -34,7 +34,7 @@ gh search code --owner LeapAutomation BugReportConfig
 | PlacementImageViewer | `static/` |
 | leap-daily-report | `static/` |
 | seal-verification-image-viewer | `seal_viewer/static/` |
-| leap-timesheet | `lib/` (the ancestor of this widget; moving onto the shared copy) |
+| leap-timesheet | `lib/` (the ancestor of this widget; a clean vendored copy since 1.6.3, leap-timesheet#429) |
 
 ## Who's using it
 

@@ -16,7 +16,8 @@
  *   <script src="capture-engine.js" defer></script>
  *   <script src="bug-report.js" defer></script>
  * html-to-image is MIT (html-to-image.LICENSE), v1.11.13, copied from the npm tarball.
- * Known gaps: it does not draw <video> frames or iframe content; html2canvas does not either.
+ * Known gaps: it does not draw <video> frames (html2canvas does not either), nor cross-origin
+ * iframe content (nothing can). Same-origin frames it draws itself.
  */
 (function () {
   "use strict";

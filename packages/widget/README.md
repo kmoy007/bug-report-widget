@@ -143,7 +143,7 @@ canvas colour if the page declares `color-scheme: dark`). Gradients and images a
 so a page whose background is only a gradient gets its nearest opaque colour.
 
 Its cost is per DOM node, so a very large page wants `captureTimeoutMs: 20000` in
-`BugReportConfig`. It does not draw `<video>` frames or iframe content (nor does html2canvas).
+`BugReportConfig`. It does not draw `<video>` frames (nor does html2canvas) or cross-origin frames.
 
 ## Modern colour functions
 
@@ -154,7 +154,7 @@ html2canvas an `onclone` hook that rewrites every `color()`, `color-mix()`, `okl
 `lab()`, `lch()` and `hwb()` value in the cloned page as the `rgba()` the browser itself resolves it
 to, `::before`/`::after` included.
 
-## Known gaps (as of 1.6.3)
+## Known gaps (as of 1.6.4)
 
 Found while rolling the widget out to seven apps (2026-10-09/12). Not bugs worth blocking on; each is
 a real edge a later version should close.
@@ -167,8 +167,9 @@ a real edge a later version should close.
   Proven in a real browser only for apps without a transformed dialog (seal viewer, timesheet).
 - **The 30 s submit timeout is a total cap, not an inactivity timer** (a slow but progressing upload
   of a big screenshot can still hit it; raise `submitTimeoutMs`).
-- **The capture engine draws neither `<video>` frames nor iframe content** (html2canvas did not either).
-  CCTV panes and embedded frames come out blank in a screenshot.
+- **Neither engine draws `<video>` frames or cross-origin frames.** CCTV panes come out blank, and a
+  cross-origin frame comes out blank under a plain "Screenshot captured." (it cannot be read, so it is not
+  counted). Same-origin frames are drawn; one that could not be is named in the dialog (1.6.4).
 - **The capture engine's cost is per DOM node.** It skips everything below the fold, but a page scrolled
   far down still clones everything above; raise `captureTimeoutMs` (the apps use 20000).
 - **A capture in a hidden browser tab stalls** (Chrome throttles rendering) and ends in "capture timed out".
@@ -208,8 +209,9 @@ The widget's own button and modal are already excluded internally — you don't 
 }
 ```
 
-Two further fields are optional and only present when they apply: `screenshotError` (a string,
-only when there is no screenshot) and `clientKey` (only with `idempotentSubmit`). A server
+Two further fields are optional and only present when they apply: `screenshotError` (a string:
+why there is no screenshot, or since 1.6.4 why part of it may be missing — an embedded frame that
+could not be drawn) and `clientKey` (only with `idempotentSubmit`). A server
 that does not know them ignores them.
 
 The full request/response contract lives in [`../spec/openapi.yaml`](../spec/openapi.yaml). The Python and Node backend libs implement it; the cross-stack e2e suite in `../../e2e` exercises every reference impl with the same scenarios.

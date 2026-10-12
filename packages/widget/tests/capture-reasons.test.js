@@ -214,6 +214,22 @@ test("a good capture sends no screenshotError and fires no event", async () => {
   assert.equal(h.events.length, 0);
 });
 
+test("a capture that could not draw a frame says so in the modal and in the POST, beside the screenshot", async () => {
+  const frame = { contentDocument: { body: {} }, getBoundingClientRect: () => ({ left: 0, top: 0, width: 10, height: 10 }), getAttribute: () => null };
+  const h = modalHarness((el) => (el.tag === "page" || !el.tag ? Promise.resolve(canvasOf([1, 2, 3, 255])) : Promise.reject(new Error("frame boom"))));
+  h.doc.querySelectorAll = (sel) => (sel === "iframe" ? [frame] : []);
+  frame.contentDocument.body.tag = "frame";
+  h.ctl.openModal();
+  await settle(15);
+  assert.equal(h.q("-hint").textContent,
+    "Screenshot captured, but 1 embedded frame may be missing from the screenshot (frame boom).");
+  h.q("-textarea").value = "x";
+  h.q("-submit").click();
+  assert.match(h.posts[0].screenshot, /^data:image/);
+  assert.equal(h.posts[0].screenshotError, "1 embedded frame may be missing from the screenshot (frame boom)");
+  assert.equal(h.events.length, 0, "not a failure: the screenshot exists");
+});
+
 test("a capture that lands after the modal was closed and reopened does not overwrite the new one", async () => {
   let finishFirst;
   let n = 0;
@@ -230,13 +246,14 @@ test("a capture that lands after the modal was closed and reopened does not over
   assert.equal(h.ctl._state().capturedDataUrl, second);
 });
 
-test("buildPostBody: clientKey and screenshotError are optional, capped, and screenshotError only without a screenshot", () => {
+test("buildPostBody: clientKey and screenshotError are optional and capped; screenshotError rides with a screenshot too (1.6.4)", () => {
   const b = widget.buildPostBody({ details: "d" });
   assert.equal("clientKey" in b, false);
   assert.equal("screenshotError" in b, false);
   assert.equal(widget.buildPostBody({ details: "d", clientKey: "k".repeat(100) }).clientKey.length, 64);
   assert.equal(widget.buildPostBody({ details: "d", screenshotError: "e".repeat(300) }).screenshotError.length, 200);
-  assert.equal("screenshotError" in widget.buildPostBody({ details: "d", screenshot: "data:x", screenshotError: "e" }), false);
+  assert.equal(widget.buildPostBody({ details: "d", screenshot: "data:x", screenshotError: "e" }).screenshotError, "e");
+  assert.equal("screenshotError" in widget.buildPostBody({ details: "d", screenshot: "data:x", screenshotError: "" }), false);
 });
 
 test("formatBytes and newClientKey", () => {
@@ -246,4 +263,10 @@ test("formatBytes and newClientKey", () => {
   assert.match(widget.newClientKey({ crypto: { randomUUID: () => "123e4567-e89b-12d3-a456-426614174000" } }), /^[0-9a-f-]{36}$/);
   assert.match(widget.newClientKey({}), /^k[0-9a-f]+$/);
   assert.notEqual(widget.newClientKey({}), widget.newClientKey({}));
+});
+
+test("describePartialCapture: nothing missing says nothing; one and several frames read right", () => {
+  assert.equal(widget.describePartialCapture({ dataUrl: "x" }), "");
+  assert.equal(widget.describePartialCapture({ framesMissed: 1, frameError: "e" }), "1 embedded frame may be missing from the screenshot (e)");
+  assert.equal(widget.describePartialCapture({ framesMissed: 2 }), "2 embedded frames may be missing from the screenshot");
 });

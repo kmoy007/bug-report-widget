@@ -329,6 +329,76 @@
     return body;
   }
 
+  // ─── Modern colour functions ───────────────────────────────────────
+
+  // html2canvas 1.4.1 parses only rgb(a)/hsl(a) colours and throws on anything
+  // newer, failing the whole capture: "Attempting to parse an unsupported color
+  // function "color"". Browsers report a `color-mix()` result (and wide-gamut
+  // colours) as `color(srgb …)` in computed styles, so one badge tinted with
+  // color-mix() was enough (PlacementImageViewer bug-20261012-185703; the seal
+  // viewer went weeks with no screenshots for the same reason). Before
+  // html2canvas reads the cloned page, every such value is rewritten as the
+  // rgba() the browser itself resolves it to (html2canvas has already copied
+  // ::before/::after into real elements by then, so they are reached too).
+  var MODERN_COLOR = /\b(?:color|color-mix|oklch|oklab|lab|lch|hwb)\((?:[^()]|\([^()]*\))*\)/gi;
+  var COLOR_PROPS = ["color", "background-color", "background-image",
+    "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+    "outline-color", "text-decoration-color", "box-shadow", "text-shadow", "fill", "stroke",
+    "-webkit-text-stroke-color", "list-style-image"];
+
+  // `value` with each modern colour function replaced by toRgba(it); one that
+  // toRgba cannot resolve (null) is left as it was. Pure.
+  function plainColors(value, toRgba) {
+    if (typeof value !== "string" || value.search(MODERN_COLOR) === -1) return value;
+    return value.replace(MODERN_COLOR, function (fn) { return toRgba(fn) || fn; });
+  }
+
+  // Any colour the browser understands, as rgba(), by painting it into one
+  // canvas pixel and reading it back. null when it cannot.
+  function canvasRgba(doc) {
+    var ctx = null;
+    try {
+      var c = doc.createElement("canvas");
+      c.width = c.height = 1;
+      ctx = c.getContext("2d", { willReadFrequently: true });
+    } catch (e) { /* no canvas */ }
+    var memo = {};
+    return function (fn) {
+      if (!ctx) return null;
+      if (Object.prototype.hasOwnProperty.call(memo, fn)) return memo[fn];
+      var out = null;
+      try {
+        ctx.fillStyle = "rgba(1, 2, 3, 0.5)";
+        var before = ctx.fillStyle;
+        ctx.fillStyle = fn;
+        if (ctx.fillStyle !== before) {     // an unparseable colour leaves it unchanged
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillRect(0, 0, 1, 1);
+          var d = ctx.getImageData(0, 0, 1, 1).data;
+          out = "rgba(" + d[0] + ", " + d[1] + ", " + d[2] + ", " + Math.round(d[3] / 255 * 1000) / 1000 + ")";
+        }
+      } catch (e) { out = null; }
+      return (memo[fn] = out);
+    };
+  }
+
+  // html2canvas's `onclone`: pin every element's modern colours as rgba().
+  function plainColorsInClone(clonedDoc) {
+    var win = clonedDoc && clonedDoc.defaultView;
+    if (!win || !win.getComputedStyle) return;
+    var toRgba = canvasRgba(clonedDoc);
+    var all = clonedDoc.getElementsByTagName("*");
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i], cs;
+      try { cs = win.getComputedStyle(el); } catch (e) { continue; }
+      for (var j = 0; j < COLOR_PROPS.length; j++) {
+        var v = cs.getPropertyValue(COLOR_PROPS[j]);
+        var plain = plainColors(v, toRgba);
+        if (plain !== v && el.style) el.style.setProperty(COLOR_PROPS[j], plain, "important");
+      }
+    }
+  }
+
   // ─── Capture (browser only) ────────────────────────────────────────
 
   // html2canvas does not render iframe CONTENT — an embedded frame comes out as
@@ -366,7 +436,7 @@
     return Promise.all(jobs.map(function (j) {
       return html2canvas(j.doc.body, {
         useCORS: true, logging: false, scale: scale,
-        backgroundColor: null,
+        backgroundColor: null, onclone: plainColorsInClone,
         width: Math.ceil(j.rect.width), height: Math.ceil(j.rect.height),
         windowWidth: Math.ceil(j.rect.width), windowHeight: Math.ceil(j.rect.height),
       }).then(function (sub) {
@@ -513,6 +583,7 @@
           useCORS: true,
           logging: false,
           scale: scale,
+          onclone: plainColorsInClone,
           // Exclude the widget itself — both the floating button and the
           // modal — so neither contributes pixels to its own screenshot.
           // Also honor an opt-out attribute consumers can mark on their
@@ -1599,6 +1670,8 @@
     formatBytes: formatBytes,
     newClientKey: newClientKey,
     encodeCanvasUnderCap: encodeCanvasUnderCap,
+    plainColors: plainColors,
+    plainColorsInClone: plainColorsInClone,
     mergeConfig: mergeConfig,
     positionCss: positionCss,
     DEFAULTS: DEFAULTS,

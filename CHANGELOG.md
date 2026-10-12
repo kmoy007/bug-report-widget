@@ -2,6 +2,22 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.3 — 2026-10-12
+
+- **Fix: a page using `color-mix()` (or `color()`, `oklch()`, `lab()`…) could not be screenshotted.**
+  html2canvas 1.4.1 parses only `rgb()`/`hsl()` colours and throws on anything newer, and browsers
+  report a `color-mix()` result as `color(srgb …)`, so one tinted badge failed the whole capture with
+  "Attempting to parse an unsupported color function \"color\"" (PlacementImageViewer
+  bug-20261012-185703; the seal viewer lost its screenshots for weeks the same way and worked round it
+  by removing `color-mix()` from its CSS). Both html2canvas calls (the page and same-origin frames) now
+  pass an `onclone` hook that rewrites each such value in the clone as the `rgba()` the browser resolves
+  it to, by painting it into one canvas pixel. Proven in Chromium: the old widget fails with the
+  reported error; this one captures, and a 16% `color-mix()` tint over white reads back exactly.
+  Pure `plainColors` and `plainColorsInClone` are exported for tests.
+- **When the capture engine's fallback fails too, the error says why html-to-image failed first.**
+  `capture-engine.js` used to drop html-to-image's error and report only html2canvas's, so a report
+  named the fallback's problem and hid the reason the better engine was not used.
+
 ## widget v1.6.2 — 2026-10-09
 
 - **Fix: dark pages were screenshotted on white.** `capture-engine.js` painted every capture on

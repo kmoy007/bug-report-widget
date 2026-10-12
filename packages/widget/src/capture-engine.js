@@ -173,11 +173,18 @@
       unpin();
       if (blank(c, bg)) throw new Error("blank");
       return c;
-    }).catch(function () {
+    }).catch(function (first) {
       unpin();
       // html2canvas gets the page colour too, instead of transparent
       var ro = opts.backgroundColor == null ? Object.assign({}, opts, { backgroundColor: bg }) : opts;
-      return real(el, ro);
+      // If the fallback fails too, say why the better engine failed first:
+      // otherwise the report names only the fallback's error.
+      return Promise.resolve().then(function () { return real(el, ro); }).catch(function (second) {
+        var why = (first && (first.message || first.type)) || String(first);
+        var e = new Error(((second && second.message) || String(second)) + " (after html-to-image: " + why + ")");
+        if (second && second.name) e.name = second.name;
+        throw e;
+      });
     });
   };
 })();

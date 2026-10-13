@@ -2,6 +2,16 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.5 — 2026-10-13
+
+- **Fix: a `<summary>` came out of a screenshot with a stray "1." beside its text.** The clone
+  html-to-image draws turns the disclosure marker into a decimal list number, in Chromium and WebKit
+  alike (found on PlacementImageViewer's bug queue, Ken's report bug-20261013-195520-0f5869). The
+  engine now takes the marker off every `<summary>` for the capture and puts it back, so a screenshot
+  shows no triangle (it never drew the right one) rather than a wrong number. Pure `pinSummaryMarkers`
+  is exported. Not fixed: in Safari the filter `<select>`s lose their padding and border in a capture,
+  and a flat white block is drawn behind some text rows (PlacementImageViewer bug-20261013-195917-462461).
+
 ## widget v1.6.4 — 2026-10-12
 
 - **Fix: a same-origin frame that could not be drawn left a blank rectangle in a screenshot that

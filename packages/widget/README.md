@@ -154,7 +154,7 @@ html2canvas an `onclone` hook that rewrites every `color()`, `color-mix()`, `okl
 `lab()`, `lch()` and `hwb()` value in the cloned page as the `rgba()` the browser itself resolves it
 to, `::before`/`::after` included.
 
-## Known gaps (as of 1.6.4)
+## Known gaps (as of 1.6.5)
 
 Found while rolling the widget out to seven apps (2026-10-09/12). Not bugs worth blocking on; each is
 a real edge a later version should close.
@@ -172,6 +172,10 @@ a real edge a later version should close.
   counted). Same-origin frames are drawn; one that could not be is named in the dialog (1.6.4).
 - **The capture engine's cost is per DOM node.** It skips everything below the fold, but a page scrolled
   far down still clones everything above; raise `captureTimeoutMs` (the apps use 20000).
+- **WebKit (Safari) draws a capture's `<select>`s without their padding and border**, and both engines
+  draw a flat white block behind some text rows. Seen on PlacementImageViewer's bug queue (1.6.5); the
+  cause is not found, and a report once showed the filter row over a help text in Safari, which has not
+  been reproduced.
 - **A capture in a hidden browser tab stalls** (Chrome throttles rendering) and ends in "capture timed out".
   Nothing to fix; know it when testing with automation.
 - **Only a fixed list of colour properties is rewritten** (`color`, backgrounds, borders, outline, text

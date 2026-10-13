@@ -94,10 +94,14 @@
   // html-to-image renders the clone as an SVG image WITHOUT scripting, where
   // <noscript> fallback content is displayed (as raw text, e.g. a stray
   // "<button ...>go</button>"). <template> content is inert and never shown.
-  // Pure: takes anything with nodeType and nodeName.
+  // An <img> with no src draws nothing on the page, but html-to-image fails on it, and
+  // one such image (a hidden pane's picture, filled when it opens) rejected the whole
+  // capture, which then fell back to html2canvas and its worse picture (PlacementImageViewer,
+  // 2026-10-13). Pure: takes anything with nodeType and nodeName.
   function neverShown(n) {
     if (!n || n.nodeType !== 1) return false;
     var name = String(n.nodeName || n.tagName || "").toUpperCase();
+    if (name === "IMG") return !(n.getAttribute && n.getAttribute("src"));
     return name === "NOSCRIPT" || name === "TEMPLATE";
   }
 

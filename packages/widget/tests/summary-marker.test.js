@@ -24,6 +24,15 @@ test("pinSummaryMarkers: no summaries is nothing to do", () => {
   assert.doesNotThrow(() => pure.pinSummaryMarkers([])());
 });
 
+test("neverShown: an <img> with no src or an empty one is skipped; one with a src is drawn", () => {
+  const img = (src) => ({ nodeType: 1, nodeName: "IMG", getAttribute: (a) => (a === "src" ? src : null) });
+  assert.equal(pure.neverShown(img(null)), true, "no src attribute");
+  assert.equal(pure.neverShown(img("")), true, "empty src");
+  assert.equal(pure.neverShown(img("data:image/png;base64,AAAA")), false);
+  assert.equal(pure.neverShown({ nodeType: 1, nodeName: "IMG" }), true, "no getAttribute at all");
+  assert.equal(pure.neverShown({ nodeType: 1, nodeName: "DIV" }), false);
+});
+
 for (const outcome of ["draws", "fails"]) {
   test(`wrapper: the marker is off while html-to-image draws, and back after it ${outcome}`, async () => {
     const s = summary("disclosure-open");

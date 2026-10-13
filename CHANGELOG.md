@@ -4,13 +4,19 @@ All notable changes to this monorepo.
 
 ## widget v1.6.5 — 2026-10-13
 
-- **Fix: a `<summary>` came out of a screenshot with a stray "1." beside its text.** The clone
-  html-to-image draws turns the disclosure marker into a decimal list number, in Chromium and WebKit
-  alike (found on PlacementImageViewer's bug queue, Ken's report bug-20261013-195520-0f5869). The
-  engine now takes the marker off every `<summary>` for the capture and puts it back, so a screenshot
-  shows no triangle (it never drew the right one) rather than a wrong number. Pure `pinSummaryMarkers`
-  is exported. Not fixed: in Safari the filter `<select>`s lose their padding and border in a capture,
-  and a flat white block is drawn behind some text rows (PlacementImageViewer bug-20261013-195917-462461).
+- **Fix: one `<img>` with no `src` made the whole screenshot fall back to the old engine, and the
+  old engine draws a worse picture.** html-to-image rejects an image that has no source, so a page
+  holding one (PlacementImageViewer's hidden placement-view picture, filled when the pane opens) never
+  got a good capture: the widget fell back to html2canvas, which drew a stray "1." beside every
+  `<summary>`, flat white blocks behind text, and the filter `<select>`s without their styling
+  (Ken's report bug-20261013-195520-0f5869; found by logging which engine drew it, then bisecting
+  the page). The engine now leaves an `<img>` with no or an empty `src` out of the capture, which
+  draws nothing on the page anyway. Checked on that page in WebKit 26.6 and Chromium: html-to-image
+  draws it, and the capture is clean.
+- **Fix: a `<summary>` came out of an html-to-image capture with a stray "1."** (seen on the live
+  page, not only in the fallback). The engine takes the disclosure marker off every `<summary>` for
+  the capture and puts it back; a screenshot shows no triangle rather than a wrong number. Pure
+  `pinSummaryMarkers` is exported.
 
 ## widget v1.6.4 — 2026-10-12
 

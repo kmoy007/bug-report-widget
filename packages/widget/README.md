@@ -172,10 +172,10 @@ a real edge a later version should close.
   counted). Same-origin frames are drawn; one that could not be is named in the dialog (1.6.4).
 - **The capture engine's cost is per DOM node.** It skips everything below the fold, but a page scrolled
   far down still clones everything above; raise `captureTimeoutMs` (the apps use 20000).
-- **WebKit (Safari) draws a capture's `<select>`s without their padding and border**, and both engines
-  draw a flat white block behind some text rows. Seen on PlacementImageViewer's bug queue (1.6.5); the
-  cause is not found, and a report once showed the filter row over a help text in Safari, which has not
-  been reproduced.
+- **The fallback engine draws a worse picture, and says nothing when it is used.** When html-to-image
+  rejects a page (an `<img>` with no `src` did, until 1.6.5) the widget falls back to html2canvas, which
+  shows a decimal marker beside `<summary>`, flat blocks behind text and unstyled `<select>`s. The report
+  looks messy rather than failing. The cause is visible only by logging which engine drew it.
 - **A capture in a hidden browser tab stalls** (Chrome throttles rendering) and ends in "capture timed out".
   Nothing to fix; know it when testing with automation.
 - **Only a fixed list of colour properties is rewritten** (`color`, backgrounds, borders, outline, text

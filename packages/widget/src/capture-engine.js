@@ -94,10 +94,14 @@
   // html-to-image renders the clone as an SVG image WITHOUT scripting, where
   // <noscript> fallback content is displayed (as raw text, e.g. a stray
   // "<button ...>go</button>"). <template> content is inert and never shown.
-  // Pure: takes anything with nodeType and nodeName.
+  // An <img> with no src draws nothing on the page, but html-to-image fails on it, and
+  // one such image (a hidden pane's picture, filled when it opens) rejected the whole
+  // capture, which then fell back to html2canvas and its worse picture (PlacementImageViewer,
+  // 2026-10-13). Pure: takes anything with nodeType and nodeName.
   function neverShown(n) {
     if (!n || n.nodeType !== 1) return false;
     var name = String(n.nodeName || n.tagName || "").toUpperCase();
+    if (name === "IMG") return !(n.getAttribute && n.getAttribute("src"));
     return name === "NOSCRIPT" || name === "TEMPLATE";
   }
 
@@ -132,7 +136,8 @@
   // Node (the unit tests) has no window: expose the pure parts and stop.
   if (typeof window === "undefined") {
     if (typeof module === "object" && module.exports) module.exports = { blank: blank, toImageOptions: toImageOptions,
-      pageBackground: pageBackground, parseColor: parseColor, neverShown: neverShown };
+      pageBackground: pageBackground, parseColor: parseColor, neverShown: neverShown,
+      pinSummaryMarkers: pinSummaryMarkers };
     return;
   }
   var real = window.html2canvas, h2i = window.htmlToImage;
@@ -164,12 +169,30 @@
     };
   }
 
+  // A <summary> is a list item whose marker is the disclosure triangle. In the clone,
+  // rendered as an SVG image, that marker came out as a decimal "1." beside the text
+  // (found on PlacementImageViewer's bug queue, 2026-10-13; Chromium and WebKit alike).
+  // Take the marker off for the length of the capture, then put it back: a screenshot
+  // without the triangle is right, one with a stray number is not. Pure: takes a list
+  // of anything with a style, and returns the function that restores them.
+  function pinSummaryMarkers(summaries) {
+    var saved = [];
+    for (var i = 0; i < summaries.length; i++) {
+      saved.push([summaries[i], summaries[i].style.listStyleType]);
+      summaries[i].style.listStyleType = "none";
+    }
+    return function () {
+      saved.forEach(function (p) { p[0].style.listStyleType = p[1]; });
+    };
+  }
+
   window.html2canvas = function (el, opts) {
     opts = opts || {};
     var bg = "#ffffff";
     try { bg = pageBackground(getComputedStyle, document.body, document.documentElement); } catch (e) { /* white */ }
     var o = toImageOptions(opts, bg);
-    var unpin = pinSvgStyles(el);
+    var unpinSvg = pinSvgStyles(el), unpinMarkers = pinSummaryMarkers(el.querySelectorAll("summary"));
+    var unpin = function () { unpinSvg(); unpinMarkers(); };
     return h2i.toCanvas(el, o).then(function (c) {
       unpin();
       if (blank(c, bg)) throw new Error("blank");

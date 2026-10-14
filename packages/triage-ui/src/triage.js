@@ -41,6 +41,7 @@
   };
   var REASON_REQUIRED_FOR = ["declined"];
   var KINDS = ["bug", "feature"];
+  var OPEN_TRIAGED = "open+triaged";
   var LABEL = {
     open: "Reopen", triaged: "Mark triaged",
     resolved: "Mark resolved", declined: "Decline",
@@ -141,14 +142,18 @@
     var doc = (root && root.ownerDocument) || (typeof document !== "undefined" ? document : null);
     if (!root || !doc || !fetchFn) throw new Error("triage.mount needs {root} and a fetch");
 
-    var state = { status: "", kind: "", days: "30" };
+    // "open+triaged" is the default: everything not yet declined or resolved.
+    // The server filters one status at a time, so it is not sent; the rows
+    // are narrowed here instead.
+    var state = { status: OPEN_TRIAGED, kind: "", days: "30" };
 
     function controlsHtml() {
       return '<div class="bugt-controls">'
         + '<label class="bugt-field">Status <select data-c="status">'
+        + '<option value="' + OPEN_TRIAGED + '" selected>open + triaged</option>'
         + '<option value="">All statuses</option>'
         + STATUSES.map(function (s) {
-          return '<option value="' + s + '"' + (s === "open" ? " selected" : "") + ">" + s + "</option>";
+          return '<option value="' + s + '">' + s + "</option>";
         }).join("")
         + "</select></label>"
         + '<label class="bugt-field">Kind <select data-c="kind">'
@@ -165,13 +170,12 @@
     }
 
     root.innerHTML = controlsHtml();
-    state.status = "open";
     var list = root.querySelector(".bugt-list");
 
     async function load() {
       list.innerHTML = '<div class="bugt-note">loading…</div>';
       var qs = "days=" + encodeURIComponent(state.days);
-      if (state.status) qs += "&status=" + encodeURIComponent(state.status);
+      if (state.status && state.status !== OPEN_TRIAGED) qs += "&status=" + encodeURIComponent(state.status);
       try {
         var res = await fetchFn(endpoint + "?" + qs);
         if (res.status === 403) {
@@ -188,7 +192,8 @@
         var bugs = (data.bugs || []).filter(function (b) {
           // Kind is DERIVED from tags server-side, so there is no column
           // to query on — filtered here, over rows the server already
-          // narrowed by status and age.
+          // narrowed by status and age (open + triaged: see above).
+          if (state.status === OPEN_TRIAGED && b.status !== "open" && b.status !== "triaged") return false;
           return !state.kind || (b.kind || "bug") === state.kind;
         });
         if (!bugs.length) {

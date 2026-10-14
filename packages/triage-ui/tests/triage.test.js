@@ -130,3 +130,62 @@ describe("the card", () => {
       /alt="The screen at the moment the report was filed"/);
   });
 });
+
+describe("the status filter", () => {
+  const MIXED = ["open", "triaged", "resolved", "declined"].map((st) => (
+    { id: "bug-" + st, title: "Report " + st, status: st, kind: "bug",
+      addedAt: "2026-10-13T08:00:00Z", tags: [] }));
+
+  // A root just real enough for mount(): innerHTML, one list, two listeners.
+  function mountFake() {
+    const urls = [];
+    const handlers = {};
+    const list = { innerHTML: "", querySelectorAll: () => [] };
+    const root = {
+      ownerDocument: {},
+      innerHTML: "",
+      querySelector: (sel) => (sel === ".bugt-list" ? list : null),
+      addEventListener: (type, fn) => { handlers[type] = fn; },
+    };
+    const fetch = async (url) => {
+      urls.push(url);
+      return { ok: true, status: 200, json: async () => ({ bugs: MIXED }) };
+    };
+    const view = triage.mount({ root, fetch });
+    const choose = async (value) => {
+      handlers.change({ target: { getAttribute: () => "status", value } });
+      await new Promise((r) => setImmediate(r));
+    };
+    const settle = () => new Promise((r) => setImmediate(r));
+    return { root, list, urls, choose, settle, view };
+  }
+  const titles = (list) => ["open", "triaged", "resolved", "declined"]
+    .filter((s) => list.innerHTML.includes("Report " + s + "<"));
+
+  it("opens on 'open + triaged', selected, above Open", () => {
+    const { root } = mountFake();
+    assert.match(root.innerHTML,
+      /<option value="open\+triaged" selected>open \+ triaged<\/option><option value="">All statuses/);
+    assert.equal((root.innerHTML.match(/ selected/g) || []).length, 2); // this + Days 30
+  });
+
+  it("shows only open and triaged reports, and sends no status parameter", async () => {
+    const { list, urls, settle } = mountFake();
+    await settle();
+    assert.deepEqual(titles(list), ["open", "triaged"]);
+    assert.ok(!/status=/.test(urls[0]), urls[0]);
+  });
+
+  it("'All statuses' shows all four", async () => {
+    const { list, urls, choose } = mountFake();
+    await choose("");
+    assert.deepEqual(titles(list), ["open", "triaged", "resolved", "declined"]);
+    assert.ok(!/status=/.test(urls[1]));
+  });
+
+  it("choosing Open sends status=open", async () => {
+    const { urls, choose } = mountFake();
+    await choose("open");
+    assert.match(urls[1], /[?&]status=open(&|$)/);
+  });
+});

@@ -42,6 +42,10 @@ the half nobody packaged — which is the half a person actually looks at.
 | `forbiddenHint` | generic | What to show on 403. Say which allowlist and **which address** — every app here gates reading to one that fails closed, and the address to add is the one people *sign in as*. Three of them locked their queue to nobody by getting that wrong. |
 | `prompt` | global `prompt` | Injected for tests. |
 
+The status filter opens on **open + triaged** (everything not declined or resolved). That choice
+sends no `status` parameter, because the server filters one status at a time; the component
+keeps only the `open` and `triaged` rows. "All statuses" and each single status stay.
+
 ## Theming
 
 Every colour is a CSS custom property with a neutral fallback, so a host

@@ -2,6 +2,16 @@
 
 All notable changes to this monorepo.
 
+## triage-ui v1.1.0 — 2026-10-13
+
+- **The queue opens on "open + triaged".** The status filter gained an "open + triaged" choice,
+  selected by default and listed first: everything not yet declined or resolved, in one list
+  (Ken, PlacementImageViewer bug-20261013-195520-0f5869: "just call it 'open + triaged' and default
+  to it"). The server filters one status at a time, so that choice sends no `status` parameter and
+  the rows are narrowed to open and triaged in the browser. "All statuses" and each single status
+  stay, and send what they sent before. Behaviour change to the default only: it used to open on
+  Open. No new mount option; embedders pass nothing new and nothing they pass changes meaning.
+
 ## widget v1.6.5 — 2026-10-13
 
 - **Fix: one `<img>` with no `src` made the whole screenshot fall back to the old engine, and the

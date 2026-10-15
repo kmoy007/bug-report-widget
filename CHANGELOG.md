@@ -2,6 +2,25 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.6 — 2026-10-15
+
+- **Fix: a cross-origin `<video>` sent the whole screenshot to the old engine, and the old engine
+  draws a worse picture.** html-to-image clones a video by drawing it on a canvas and calling
+  `toDataURL()`; a video from another origin without CORS (StoppageViewer's CCTV clip, a signed
+  blob URL) taints that canvas, `toDataURL()` throws a SecurityError and the capture was rejected. The
+  fallback, html2canvas, draws no video and piled the help panel's text one letter per line down the right
+  edge (StoppageViewer bug-20261014-163549 and bug-20261014-231951). For the length of a capture the
+  engine now stands in an `<img>` for every visible `<video>` (same class, inline style and size, and the
+  video's computed position, inset, margins, display, transform and z-index, since a rule keyed on `video` does
+  not match an `<img>`; put right before it; the video is hidden, not removed, so playback is not disturbed) and restores it on
+  success and failure. The picture is the video's current frame, fitted by `object-fit`; if the browser
+  will not let a script read it, a dark tile reading "Video not in screenshot (cross-origin)". Nothing
+  about a video can reject a capture: a video with no frame yet gets a "Video not loaded yet" tile, and the
+  page is put back by the engine's own 30 s timer if html-to-image never settles (the widget abandons a
+  capture at `captureTimeoutMs`), and a `toCanvas` that throws synchronously reaches the fallback. The video itself is left out of html-to-image's clone (hiding it is
+  not enough: the clone draws it on a canvas whatever its `display`). Pure `fitRect` and `standInVideos`
+  are exported.
+
 ## triage-ui v1.1.0 — 2026-10-13
 
 - **The queue opens on "open + triaged".** The status filter gained an "open + triaged" choice,

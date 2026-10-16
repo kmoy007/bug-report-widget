@@ -27,6 +27,12 @@ function makeDom() {
         this.children = this.children.filter(function (x) { return x !== c; });
         c.parentNode = null; return c;
       },
+      insertBefore: function (c, ref) {
+        if (c.parentNode) c.parentNode.removeChild(c);
+        var i = this.children.indexOf(ref);
+        if (i < 0) this.children.push(c); else this.children.splice(i, 0, c);
+        c.parentNode = this; return c;
+      },
       remove: function () { if (this.parentNode) this.parentNode.removeChild(this); },
       setAttribute: function (k, v) { this._attrs[k] = v; },
       getAttribute: function (k) { return this._attrs[k] === undefined ? null : this._attrs[k]; },
@@ -93,7 +99,7 @@ function makeDom() {
 function makeCtx() {
   var calls = [];
   var ctx = { calls: calls };
-  ["clearRect", "drawImage", "beginPath", "moveTo", "lineTo", "stroke", "strokeRect", "fillRect"].forEach(function (n) {
+  ["clearRect", "drawImage", "beginPath", "moveTo", "lineTo", "stroke", "strokeRect", "fillRect", "fillText"].forEach(function (n) {
     ctx[n] = function () { calls.push(n); };
   });
   ctx.count = function (n) { return calls.filter(function (c) { return c === n; }).length; };

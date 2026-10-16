@@ -16,8 +16,9 @@
  *   <script src="capture-engine.js" defer></script>
  *   <script src="bug-report.js" defer></script>
  * html-to-image is MIT (html-to-image.LICENSE), v1.11.13, copied from the npm tarball.
- * Known gaps: it does not draw <video> frames (html2canvas does not either), nor cross-origin
- * iframe content (nothing can). Same-origin frames it draws itself.
+ * Known gaps: a <video> is drawn as one still frame (1.6.6), or a dark "Video not in screenshot
+ * (cross-origin)" tile when the browser will not let a script read it; cross-origin iframe content
+ * is not drawn (nothing can). Same-origin frames it draws itself.
  */
 (function () {
   "use strict";
@@ -102,7 +103,112 @@
     if (!n || n.nodeType !== 1) return false;
     var name = String(n.nodeName || n.tagName || "").toUpperCase();
     if (name === "IMG") return !(n.getAttribute && n.getAttribute("src"));
+    // A <video> with a source: html-to-image would draw it on a canvas and toDataURL() it, which
+    // throws for a cross-origin video and rejects the whole capture even when the video is
+    // hidden (display:none does not stop the clone). Every visible one has an <img> in its
+    // place for the capture (standInVideos); a hidden one draws nothing on the page.
+    // The rule is the same as standInVideos': a video with a source is replaced (visible) or draws
+    // nothing (no box), so html-to-image never clones one. If a stand-in fails, the video is left
+    // out of the picture rather than risking the capture.
+    if (name === "VIDEO") return !!n.currentSrc;
     return name === "NOSCRIPT" || name === "TEMPLATE";
+  }
+
+  // Where object-fit puts a video's picture inside its box (bw x bh), given the picture's own
+  // size (vw x vh): {x, y, w, h} in box pixels. "contain" letterboxes, "cover" fills and
+  // crops, anything else (fill, none, scale-down, unknown) is treated as "fill". Pure.
+  function fitRect(fit, vw, vh, bw, bh) {
+    if ((fit !== "contain" && fit !== "cover") || !(vw > 0) || !(vh > 0)) return { x: 0, y: 0, w: bw, h: bh };
+    var k = fit === "contain" ? Math.min(bw / vw, bh / vh) : Math.max(bw / vw, bh / vh);
+    var w = vw * k, h = vh * k;
+    return { x: (bw - w) / 2, y: (bh - h) / 2, w: w, h: h };
+  }
+
+  // What puts a video where it sits on the page, which a rule keyed on the element type
+  // (`#rvcam .evframe video{position:absolute;inset:0;margin:auto}`) does not give an <img>:
+  // copied from the video's computed style onto the stand-in, so it lands in the same place
+  // and does not push the layout (StoppageViewer's Step through camera).
+  var VIDEO_LAYOUT = ["position", "top", "right", "bottom", "left", "marginTop", "marginRight",
+    "marginBottom", "marginLeft", "display", "cssFloat", "transform", "transformOrigin", "zIndex",
+    "boxSizing", "borderRadius", "verticalAlign", "backgroundColor"];
+
+  var VIDEO_PLACEHOLDER = "Video not in screenshot (cross-origin)";
+  var VIDEO_NOT_LOADED = "Video not loaded yet";
+
+  // A w x h dark tile with one centred line of light grey text, as a data URL. Always works
+  // (a fresh canvas is never tainted).
+  function tile(doc, w, h, text) {
+    var t = doc.createElement("canvas");
+    t.width = w; t.height = h;
+    var x = t.getContext("2d");
+    x.fillStyle = "#000";
+    x.fillRect(0, 0, w, h);
+    x.fillStyle = "#bbb";
+    x.font = Math.max(12, Math.min(20, Math.round(w / 20))) + "px sans-serif";
+    x.textAlign = "center";
+    x.textBaseline = "middle";
+    x.fillText(text, w / 2, h / 2);
+    return t.toDataURL();
+  }
+
+  // html-to-image clones a <video> by drawing it on a canvas and calling toDataURL(). A video
+  // from another origin without CORS taints that canvas, toDataURL throws a SecurityError,
+  // and the whole capture was rejected, so the report fell back to html2canvas, which draws
+  // no video and piles the help text one letter per line (StoppageViewer bug-20261014-163549
+  // and bug-20261014-231951: the clip is a signed blob URL). So for the capture each visible
+  // video is stood in for by an <img> of the same look and size, put right before it, and the
+  // video is only hidden (removing it would pause it or lose its place). The picture is the
+  // video's current frame; if the browser will not give that up (tainted), a dark tile that
+  // says so. Nothing here may throw: a video must never be the reason a capture fails.
+  // Pure-ish: takes a list of video-like elements, a document, fitOf(video) -> object-fit and
+  // styleOf(video) -> a getComputedStyle-like object (read before the video is hidden);
+  // returns the (idempotent) function that puts everything back.
+  function standInVideos(videos, doc, fitOf, styleOf) {
+    var saved = [];
+    for (var i = 0; i < videos.length; i++) {
+      var v = videos[i];
+      try {
+        var w = v.clientWidth, h = v.clientHeight;
+        if (!(w > 0 && h > 0) || !v.currentSrc || !v.parentNode) continue;
+        var url;
+        if (!(v.readyState >= 2) || !(v.videoWidth > 0 && v.videoHeight > 0)) {
+          // no frame yet: drawImage would draw nothing and say nothing, a transparent stand-in
+          url = tile(doc, w, h, VIDEO_NOT_LOADED);
+        } else {
+          try {
+            var c = doc.createElement("canvas");
+            c.width = w; c.height = h;
+            var r = fitRect(fitOf(v), v.videoWidth, v.videoHeight, w, h);
+            c.getContext("2d").drawImage(v, r.x, r.y, r.w, r.h);
+            url = c.toDataURL();
+          } catch (tainted) {
+            url = tile(doc, w, h, VIDEO_PLACEHOLDER);
+          }
+        }
+        var img = doc.createElement("img");
+        img.className = v.className;
+        img.style.cssText = v.style.cssText;
+        var cs = null;
+        try { cs = styleOf ? styleOf(v) : null; } catch (e) { /* the class and inline style alone */ }
+        for (var j = 0; cs && j < VIDEO_LAYOUT.length; j++) {
+          if (cs[VIDEO_LAYOUT[j]]) img.style[VIDEO_LAYOUT[j]] = cs[VIDEO_LAYOUT[j]];
+        }
+        img.style.width = w + "px";
+        img.style.height = h + "px";
+        img.src = url;
+        var before = v.style.display;
+        v.parentNode.insertBefore(img, v);
+        v.style.display = "none";
+        saved.push([v, img, before]);
+      } catch (e) { /* this video stays as it was: the capture goes on without a frame of it */ }
+    }
+    return function () {
+      var s;
+      while ((s = saved.pop())) {
+        try { if (s[1].parentNode) s[1].parentNode.removeChild(s[1]); } catch (e) { /* gone already */ }
+        s[0].style.display = s[2];
+      }
+    };
   }
 
   // The options html-to-image gets for a given html2canvas-style call. Pure.
@@ -137,7 +243,7 @@
   if (typeof window === "undefined") {
     if (typeof module === "object" && module.exports) module.exports = { blank: blank, toImageOptions: toImageOptions,
       pageBackground: pageBackground, parseColor: parseColor, neverShown: neverShown,
-      pinSummaryMarkers: pinSummaryMarkers };
+      pinSummaryMarkers: pinSummaryMarkers, fitRect: fitRect, standInVideos: standInVideos };
     return;
   }
   var real = window.html2canvas, h2i = window.htmlToImage;
@@ -186,19 +292,32 @@
     };
   }
 
+  // The widget gives up on a capture at its captureTimeoutMs, but a promise that never settles
+  // would leave the stand-ins in the live page (a video hidden, a frozen frame or dark tile
+  // in its place). So the engine puts the page back by itself after this long, whatever
+  // html-to-image is doing: longer than any capture the apps wait for (they use 20 s).
+  var UNPIN_AFTER_MS = 30000;
+
   window.html2canvas = function (el, opts) {
     opts = opts || {};
     var bg = "#ffffff";
     try { bg = pageBackground(getComputedStyle, document.body, document.documentElement); } catch (e) { /* white */ }
     var o = toImageOptions(opts, bg);
     var unpinSvg = pinSvgStyles(el), unpinMarkers = pinSummaryMarkers(el.querySelectorAll("summary"));
-    var unpin = function () { unpinSvg(); unpinMarkers(); };
-    return h2i.toCanvas(el, o).then(function (c) {
-      unpin();
+    var videos = el.querySelectorAll("video");
+    var unpinVideos = !videos.length ? function () {} : standInVideos(videos, document, function (v) {
+      try { return getComputedStyle(v).objectFit; } catch (e) { return "fill"; }
+    }, function (v) { return getComputedStyle(v); });
+    var unpin = function () { unpinSvg(); unpinMarkers(); unpinVideos(); };
+    var timer = setTimeout(unpin, UNPIN_AFTER_MS);
+    var settled = function () { clearTimeout(timer); unpin(); };
+    // via a then: a toCanvas that throws synchronously is a rejection, so it reaches the fallback
+    return Promise.resolve().then(function () { return h2i.toCanvas(el, o); }).then(function (c) {
+      settled();
       if (blank(c, bg)) throw new Error("blank");
       return c;
     }).catch(function (first) {
-      unpin();
+      settled();
       // html2canvas gets the page colour too, instead of transparent
       var ro = opts.backgroundColor == null ? Object.assign({}, opts, { backgroundColor: bg }) : opts;
       // If the fallback fails too, say why the better engine failed first:

@@ -154,7 +154,7 @@ html2canvas an `onclone` hook that rewrites every `color()`, `color-mix()`, `okl
 `lab()`, `lch()` and `hwb()` value in the cloned page as the `rgba()` the browser itself resolves it
 to, `::before`/`::after` included.
 
-## Known gaps (as of 1.6.5)
+## Known gaps (as of 1.6.6)
 
 Found while rolling the widget out to seven apps (2026-10-09/12). Not bugs worth blocking on; each is
 a real edge a later version should close.
@@ -167,9 +167,13 @@ a real edge a later version should close.
   Proven in a real browser only for apps without a transformed dialog (seal viewer, timesheet).
 - **The 30 s submit timeout is a total cap, not an inactivity timer** (a slow but progressing upload
   of a big screenshot can still hit it; raise `submitTimeoutMs`).
-- **Neither engine draws `<video>` frames or cross-origin frames.** CCTV panes come out blank, and a
-  cross-origin frame comes out blank under a plain "Screenshot captured." (it cannot be read, so it is not
-  counted). Same-origin frames are drawn; one that could not be is named in the dialog (1.6.4).
+- **A `<video>` is one still frame, or a dark tile.** Since 1.6.6 the engine puts an `<img>` of the
+  video's current frame in its place for the capture (hiding, not removing, the video), fitted as its
+  `object-fit` says (`contain`, `cover`, otherwise `fill`). A video the browser will not let a script read
+  (cross-origin without CORS, e.g. a signed blob URL) gets a dark tile reading "Video not in screenshot
+  (cross-origin)"; before 1.6.6 such a video rejected the whole html-to-image capture. A cross-origin frame
+  still comes out blank under a plain "Screenshot captured." (it cannot be read, so it is not counted).
+  Same-origin frames are drawn; one that could not be is named in the dialog (1.6.4).
 - **The capture engine's cost is per DOM node.** It skips everything below the fold, but a page scrolled
   far down still clones everything above; raise `captureTimeoutMs` (the apps use 20000).
 - **The fallback engine draws a worse picture, and says nothing when it is used.** When html-to-image

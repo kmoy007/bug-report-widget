@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Protocol
@@ -185,10 +185,11 @@ def _atomic_write(path: Path, data: bytes) -> None:
     while another handle holds the target open; a refused replace falls back to
     the in-place write this store always did (readers retry, see ``_read_json``).
     """
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".tmp")
+    # os.open with 0o666 gets the mode a plain write would (0666 & ~umask, applied by
+    # the kernel); tempfile.mkstemp would make it 0600.
+    tmp = path.parent / f".{path.name}.{uuid.uuid4().hex[:12]}.tmp"
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o666)
     try:
-        # mkstemp makes the file 0600; a plain write_bytes would have made it 0666 & ~umask
-        os.fchmod(fd, 0o666 & ~_umask())
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
@@ -204,12 +205,6 @@ def _atomic_write(path: Path, data: bytes) -> None:
         _unlink_quietly(tmp)
         log.warning("bug store: os.replace refused for %s (%s); writing in place", path.name, e)
         path.write_bytes(data)
-
-
-def _umask() -> int:
-    mask = os.umask(0)
-    os.umask(mask)
-    return mask
 
 
 def _unlink_quietly(path) -> None:

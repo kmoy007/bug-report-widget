@@ -84,7 +84,8 @@ test("a retry reads a report that is briefly unparseable", async () => {
   assert.equal((await store.getBug(b.id)).id, b.id);
 });
 
-test("a failing temp write leaves the report intact and no temp", async () => {
+test("a failing temp write leaves the report intact and no temp", async t => {
+  if (process.platform === "win32" || (process.getuid && process.getuid() === 0)) return t.skip("needs a non-root POSIX user");
   const d = await tmpdir();
   const store = new FilesystemStore(d);
   const b = bug();
@@ -93,7 +94,6 @@ test("a failing temp write leaves the report intact and no temp", async () => {
   const before = await readFile(file, "utf8");
   await chmod(d, 0o555);                       // the temp cannot be created
   try {
-    if (process.getuid && process.getuid() === 0) return;   // root ignores the mode
     await assert.rejects(store.updateStatus(b.id, "triaged"));
   } finally { await chmod(d, 0o755); }
   assert.equal(await readFile(file, "utf8"), before);

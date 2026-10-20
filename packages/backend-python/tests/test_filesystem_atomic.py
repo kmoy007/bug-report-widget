@@ -139,13 +139,16 @@ def test_stale_temp_files_are_swept_at_start_and_fresh_ones_kept(tmp_path):
     assert sorted(os.listdir(tmp_path)) == [".new.tmp"]
 
 
-def test_a_report_is_readable_by_others_like_a_plain_write(tmp_path):
-    store = FilesystemStore(tmp_path)
-    bug = _bug()
-    store.put_bug(bug, b"\x89PNG")
-    mask = os.umask(0); os.umask(mask)
+def test_a_new_report_has_a_plain_writes_mode(tmp_path):
+    old = os.umask(0o022)
+    try:
+        store = FilesystemStore(tmp_path)
+        bug = _bug()
+        store.put_bug(bug, b"\x89PNG")
+    finally:
+        os.umask(old)
     for name in (f"{bug.id}.json", f"{bug.id}.png"):
-        assert (tmp_path / name).stat().st_mode & 0o777 == 0o666 & ~mask
+        assert (tmp_path / name).stat().st_mode & 0o777 == 0o644
 
 
 def test_a_read_retries_a_report_that_is_briefly_unparseable(tmp_path):

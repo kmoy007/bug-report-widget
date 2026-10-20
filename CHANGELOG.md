@@ -15,7 +15,9 @@ All notable changes to this monorepo.
   store opens. A report that still will not parse is re-read up to 5 times (20 ms apart) before
   `get_bug` raises or `list_bugs` skips it. If the share refuses the rename (SMB can, while another
   handle holds the target open) the write falls back to the old in-place write and logs a warning.
-  The audit file is appended to, never rewritten, and is unchanged. Not verified on a live Azure Files
+  The audit file is appended to, never rewritten, and is unchanged. Files keep a plain write's mode (0666 & ~umask), not
+  `mkstemp`'s 0600. Known and accepted: the in-place fallback can still tear a read (and a screenshot read
+  has no retry); a report that never parses costs ~80 ms per listing. Not verified on a live Azure Files
   mount by this change; the fallback is the guard.
 
 ## widget v1.6.6 — 2026-10-15

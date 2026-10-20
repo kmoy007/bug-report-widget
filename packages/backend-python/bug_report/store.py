@@ -187,6 +187,8 @@ def _atomic_write(path: Path, data: bytes) -> None:
     """
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".tmp")
     try:
+        # mkstemp makes the file 0600; a plain write_bytes would have made it 0666 & ~umask
+        os.fchmod(fd, 0o666 & ~_umask())
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
@@ -202,6 +204,12 @@ def _atomic_write(path: Path, data: bytes) -> None:
         _unlink_quietly(tmp)
         log.warning("bug store: os.replace refused for %s (%s); writing in place", path.name, e)
         path.write_bytes(data)
+
+
+def _umask() -> int:
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
 
 
 def _unlink_quietly(path) -> None:

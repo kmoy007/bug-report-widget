@@ -91,6 +91,23 @@ removed from the page with them inside gives them back first). They are `positio
 they stay where they are. Non-modal dialogs are ignored. If your app already does this itself it
 is harmless, and `reachOverDialogs: false` turns the built-in off.
 
+**What the screenshot covers.** What is on screen when the 🐛 is tapped: the visual viewport
+(`window.visualViewport`, falling back to the layout viewport), measured before the form opens, so a
+phone's keyboard coming up cannot shrink or move it. Not `documentElement.clientHeight`: iOS Safari
+keeps that at its smallest viewport, which left the bottom ~40px of the screen out once the toolbar
+collapsed (LeapHQ `bug-20261020-213458`, 1.6.7). A pinch-zoomed page gives the zoomed part.
+`visibleArea(window, document)` returns the area. The page shows faintly under iOS 26's floating
+toolbar; no API reports that strip and it is behind the browser's controls, so it is not captured.
+
+**The page behind the form cannot be used.** While the form is open its siblings are `inert` (no
+taps, no focus, hidden from a screen reader, so Tab stays in the form), and a touch or wheel scroll is
+stopped unless it scrolls something inside the form; the form's own scroll does not chain into the
+page (`overscroll-behavior: contain`). Inside a modal `<dialog>` it is the dialog's other children.
+The screenshot viewer and the toast stay usable, and a node the app made `inert` itself is left as
+it was. A phone's keyboard may still scroll the page to show the field (asking the browser not to
+leaves the field under the keyboard on iOS), so on close the page is put back where it was. Before
+1.6.7, swiping the backdrop on an iPhone scrolled the page underneath.
+
 **DOM ids.** `idPrefix` names the button (`<prefix>-button`), the report form
 (`<prefix>-modal` and its parts) and the toast. The screenshot viewer's id is **always**
 `bug-report-viewer` (its buttons `bug-report-viewer-done` etc.), whatever the prefix: apps'
@@ -105,7 +122,8 @@ own tests select it, so it is not derived from `idPrefix`.
 | `window.BugReportWidget.buildPostBody(opts)` | pure fn | Returns the request body sent to `/api/bugs`. Wire-format-stable. |
 | `window.BugReportWidget.isBlankCanvas(canvas)` | pure fn | Safari fallback signal — true if the canvas has no real pixels. |
 | `window.BugReportWidget.captureScreenshot(deps, cfg)` | async | Returns a data URL or `null` (fail/timeout/blank). |
-| `window.BugReportWidget.captureScreenshotDetailed(deps, cfg)` | async | `{dataUrl, reason, …}` — says why there is no image. |
+| `window.BugReportWidget.captureScreenshotDetailed(deps, cfg, area?)` | async | `{dataUrl, reason, …}` — says why there is no image. `area` (a `visibleArea()`) crops to an area measured earlier. |
+| `window.BugReportWidget.visibleArea(window, document)` | pure fn | What is on screen, in page coordinates, or `null`. |
 | `window.BugReportWidget.describeCaptureFailure(result)` | pure fn | The one-line, human-readable reason. |
 | `window.BugReportWidget.openViewer(src, {annotate, onDone})` | fn | The zoom/markup viewer, standalone. `annotate: false` is view-only. |
 
@@ -154,7 +172,7 @@ html2canvas an `onclone` hook that rewrites every `color()`, `color-mix()`, `okl
 `lab()`, `lch()` and `hwb()` value in the cloned page as the `rgba()` the browser itself resolves it
 to, `::before`/`::after` included.
 
-## Known gaps (as of 1.6.6)
+## Known gaps (as of 1.6.7)
 
 Found while rolling the widget out to seven apps (2026-10-09/12). Not bugs worth blocking on; each is
 a real edge a later version should close.
@@ -174,6 +192,13 @@ a real edge a later version should close.
   (cross-origin)"; before 1.6.6 such a video rejected the whole html-to-image capture. A cross-origin frame
   still comes out blank under a plain "Screenshot captured." (it cannot be read, so it is not counted).
   Same-origin frames are drawn; one that could not be is named in the dialog (1.6.4).
+- **With `capture-engine.js`, a page the keyboard has scrolled is drawn where it is now.** html2canvas
+  is told the scroll position measured before the form opened (1.6.7); html-to-image renders the live
+  page and has no such option, so fixed elements can come out shifted. The capture usually finishes
+  before the keyboard moves anything.
+- **With a phone's keyboard up, the form may be taller than what is visible**, and scrolling outside
+  something that scrolls is blocked (1.6.7), so Submit can need the keyboard dismissed first.
+  Checked in the iOS Simulator for the default form, which fits; a tall form was not.
 - **The capture engine's cost is per DOM node.** It skips everything below the fold, but a page scrolled
   far down still clones everything above; raise `captureTimeoutMs` (the apps use 20000).
 - **The fallback engine draws a worse picture, and says nothing when it is used.** When html-to-image

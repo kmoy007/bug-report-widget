@@ -454,6 +454,53 @@
     })).then(function () { return canvas; });
   }
 
+  // The part of the page that is on screen, as html2canvas wants it: x/y/width/
+  // height in page coordinates, left/top where it starts inside the layout
+  // viewport (iframe rects are relative to that), the scroll position, and the
+  // window the clone is laid out in. null when the host reports no geometry.
+  //
+  // The visual viewport is what the user sees. documentElement.clientHeight is
+  // NOT: iOS Safari keeps it at the smallest viewport (toolbar shown), so once
+  // the toolbar collapses on scroll the bottom ~40px of what is on screen was
+  // left out (LeapHQ bug-20261020-213458, iPhone, iOS 26: client 714, visible
+  // 754). A pinch-zoomed page shows only part of the layout viewport, which
+  // visualViewport's offset and size also describe. The page also shows faintly
+  // under iOS 26's floating toolbar; no API reports that strip, and it is
+  // behind the browser's own controls, so it stays out.
+  //
+  // The clone is laid out at the layout width (media queries) and at the
+  // taller of the two heights, which is where position:fixed;bottom:0 sits
+  // while the toolbar is collapsed.
+  function scrollPos(win) {
+    return {
+      x: (win && (win.scrollX != null ? win.scrollX : win.pageXOffset)) || 0,
+      y: (win && (win.scrollY != null ? win.scrollY : win.pageYOffset)) || 0,
+    };
+  }
+  function visibleArea(win, doc) {
+    var de = doc && doc.documentElement;
+    var cw = (de && de.clientWidth) || 0, ch = (de && de.clientHeight) || 0;
+    var iw = (win && win.innerWidth) || 0, ih = (win && win.innerHeight) || 0;
+    var sp = scrollPos(win), sx = sp.x, sy = sp.y;
+    var vv = win && win.visualViewport;
+    var hasVv = !!(vv && vv.width > 0 && vv.height > 0);
+    // innerHeight includes a desktop's horizontal scrollbar, so it only wins
+    // when the visible area really is taller than clientHeight (iOS).
+    var layoutW = cw || iw;
+    var layoutH = hasVv && ch && vv.height <= ch ? ch : Math.max(ch, ih);
+    var left = 0, top = 0, w = layoutW, h = layoutH;
+    if (hasVv) {
+      left = vv.offsetLeft || 0; top = vv.offsetTop || 0;
+      w = vv.width; h = vv.height;
+    }
+    if (!(w > 0 && h > 0)) return null;
+    return {
+      x: sx + left, y: sy + top, width: Math.round(w), height: Math.round(h),
+      left: left, top: top, scrollX: sx, scrollY: sy,
+      windowWidth: Math.round(layoutW || w), windowHeight: Math.round(layoutH || h),
+    };
+  }
+
   // Inject the html2canvas script once and resolve the global (or null if it
   // would not load). In-flight loads are shared so two quick clicks inject one
   // script; a failed load is forgotten so the next click may try again.
@@ -524,7 +571,10 @@
   // The timeout is load-bearing — html2canvas has been known to hang on iOS
   // Safari with certain CSS features (filters, blend modes, large viewports).
   // Without it the widget can lock up. It also covers a lazy script load.
-  function captureScreenshotDetailed(deps, cfg) {
+  //
+  // `view` (optional): the visibleArea() to crop to, measured earlier. Omitted,
+  // it is measured when the render starts.
+  function captureScreenshotDetailed(deps, cfg, view) {
     var doc = deps.document;
     var win = deps.window || (typeof window !== "undefined" ? window : null);
     var now = deps.now || function () { return Date.now(); };
@@ -586,18 +636,16 @@
         var modalId = cfg.idPrefix + "-modal";
         var scale = Math.min((win && win.devicePixelRatio) || 1, 2);
 
-        // Capture the VIEWPORT, not the whole document. Rendering doc.body
+        // Capture what is ON SCREEN, not the whole document. Rendering doc.body
         // uncropped scales with scroll height: a long list page produced a
         // viewport-wide × full-scroll-height PNG that blew past the server's
         // size cap (413, report dead-ended) and previewed as a sliver. What
         // the user sees when they hit the button is the bug context anyway.
         // Falls back to the uncropped capture when viewport geometry is
-        // unavailable (headless hosts, exotic embeds).
-        var viewW = (doc.documentElement && doc.documentElement.clientWidth) || (win && win.innerWidth) || 0;
-        var viewH = (doc.documentElement && doc.documentElement.clientHeight) || (win && win.innerHeight) || 0;
-        var scrollX = (win && (win.scrollX != null ? win.scrollX : win.pageXOffset)) || 0;
-        var scrollY = (win && (win.scrollY != null ? win.scrollY : win.pageYOffset)) || 0;
-        var cropped = viewW > 0 && viewH > 0;
+        // unavailable (headless hosts, exotic embeds). The area is normally
+        // measured by openModal before the form opens (see visibleArea).
+        var area = view !== undefined ? view : visibleArea(win, doc);
+        var cropped = !!area;
 
         var opts = {
           useCORS: true,
@@ -616,20 +664,25 @@
           },
         };
         if (cropped) {
-          opts.x = scrollX;
-          opts.y = scrollY;
-          opts.width = viewW;
-          opts.height = viewH;
-          opts.windowWidth = viewW;
-          opts.windowHeight = viewH;
+          opts.x = area.x;
+          opts.y = area.y;
+          opts.width = area.width;
+          opts.height = area.height;
+          opts.windowWidth = area.windowWidth;
+          opts.windowHeight = area.windowHeight;
+          // The scroll position as it was measured: by the time this runs the
+          // page may have moved (iOS scrolls a focused field into view).
+          opts.scrollX = area.scrollX;
+          opts.scrollY = area.scrollY;
         }
 
         try {
           Promise.resolve(html2canvas(doc.body, opts)).then(function (canvas) {
-            // Frame rects are viewport-relative; so is the canvas when
-            // cropped. Uncropped, positions are body-relative.
+            // Frame rects are relative to the layout viewport; the cropped
+            // canvas starts at the visible area's corner within it.
+            // Uncropped, positions are body-relative.
             var origin = cropped
-              ? { left: 0, top: 0 }
+              ? { left: area.left, top: area.top }
               : doc.body.getBoundingClientRect();
             // paste any same-origin iframe content in before serialising
             var missed = [];
@@ -1094,6 +1147,8 @@
       padding: "16px",
       "max-width": "560px", width: "100%", "max-height": "92vh",
       overflow: "auto",
+      // A scroll that reaches the form's end must not carry on into the page.
+      "overscroll-behavior": "contain",
       "box-shadow": "0 -8px 24px rgba(0,0,0,0.2)",
       "padding-bottom": "calc(env(safe-area-inset-bottom, 0px) + 16px)",
     });
@@ -1340,6 +1395,74 @@
       if (hint) hint.textContent = "Screenshot marked up. Click it to edit more.";
     }
 
+    // While the form is open, the page behind it cannot be used (LeapHQ
+    // bug-20261020-213458: on an iPhone the page under the sheet scrolled).
+    // Its siblings are made `inert` — no taps, no focus, hidden from a screen
+    // reader, which also keeps Tab inside the form — and touch or wheel
+    // scrolling is stopped unless it scrolls something inside the form. The
+    // scroll lock is listeners, not overflow:hidden on <html>: that would drop a
+    // desktop scrollbar and reflow the page while it is being captured.
+    // Siblings of the form's CURRENT parent, so it follows a move into a <dialog>
+    // (whose showModal() has made the rest inert already). The viewer and the
+    // toast stay usable; a node the app had made inert itself is left alone.
+    var inerted = [], inertHost = null;
+    function releaseInert() {
+      inerted.forEach(function (n) { try { n.removeAttribute("inert"); } catch (e) {} });
+      inerted = []; inertHost = null;
+    }
+    function inertBehind() {
+      releaseInert();
+      var form = deps.document.getElementById(modalId);
+      var host = form && form.parentNode;
+      if (!host || !host.children) return;
+      inertHost = host;
+      Array.prototype.slice.call(host.children).forEach(function (n) {
+        if (n === form || n.id === VIEWER_ID || n.id === toastId) return;
+        if (!n.setAttribute || (n.getAttribute && n.getAttribute("inert") != null)) return;
+        n.setAttribute("inert", "");
+        inerted.push(n);
+      });
+    }
+    function scrollsInsideForm(target) {
+      var form = deps.document.getElementById(modalId);
+      for (var n = target; n && n !== deps.document; n = n.parentNode) {
+        if (n.id === VIEWER_ID) return true;      // the viewer handles its own gestures
+        if (n === form) return false;             // reached the backdrop: nothing of ours scrolls
+        if (n.scrollHeight > n.clientHeight + 1) return true;
+      }
+      return false;
+    }
+    function blockPageScroll(e) {
+      if (!scrollsInsideForm(e && e.target)) { try { e.preventDefault(); } catch (_) {} }
+    }
+    // A plain focus: with preventScroll, iOS leaves the field under the
+    // keyboard (the sheet is fixed to the bottom of the layout viewport).
+    function focusTextarea() {
+      var ta = deps.document.getElementById(modalId + "-textarea");
+      if (ta && ta.focus) try { ta.focus(); } catch (_) {}
+    }
+    // Where the page was when the form opened. A phone's keyboard can still
+    // scroll it (iOS moved a page from 577 to 1014 to make room), and the
+    // reporter could not have scrolled it themselves, so it goes back on close.
+    var openScroll = null;
+    function restoreScroll() {
+      var at = openScroll;
+      openScroll = null;
+      if (!at || !win || typeof win.scrollTo !== "function") return;
+      var now = scrollPos(win);
+      if (now.x !== at.x || now.y !== at.y) try { win.scrollTo(at.x, at.y); } catch (_) {}
+    }
+    var scrollLocked = false;
+    function lockScroll(on) {
+      var doc = deps.document;
+      if (!doc.addEventListener || on === scrollLocked) return;
+      scrollLocked = on;
+      ["touchmove", "wheel"].forEach(function (t) {
+        if (on) doc.addEventListener(t, blockPageScroll, { passive: false });
+        else doc.removeEventListener(t, blockPageScroll, { passive: false });
+      });
+    }
+
     // Escape closes the modal — unless the screenshot viewer is up, whose own
     // Escape closes just the viewer (its listener runs after this one, so the
     // viewer is still in the DOM here).
@@ -1348,7 +1471,10 @@
       openSeq++;
       capturedDataUrl = null; originalDataUrl = null; markStrokes = [];
       captureError = ""; submissionKey = null; attempt = null;
+      releaseInert();
+      lockScroll(false);
       removeById(deps.document, modalId);
+      restoreScroll();
       if (escHandler) {
         deps.document.removeEventListener && deps.document.removeEventListener("keydown", escHandler);
         escHandler = null;
@@ -1509,12 +1635,19 @@
       submissionKey = newClientKey(win);
       attempt = null;
       captureError = "";
+      // What is on screen NOW, before the form opens: focusing its textarea
+      // brings up a phone's keyboard, which shrinks the visible area and may
+      // scroll the page, and the capture runs after that.
+      var area = visibleArea(win, deps.document);
+      openScroll = win ? scrollPos(win) : null;
 
       var overlay = buildModal(deps.document, cfg, {
         onCancel: closeModal,
         onSubmit: function (description, ui) { onSubmit(description, ui, mySeq); },
       });
       deps.document.body.appendChild(overlay);
+      inertBehind();
+      lockScroll(true);
 
       if (escHandler && deps.document.removeEventListener) deps.document.removeEventListener("keydown", escHandler);
       escHandler = function (e) {
@@ -1526,14 +1659,13 @@
       };
       deps.document.addEventListener && deps.document.addEventListener("keydown", escHandler);
 
-      var ta = deps.document.getElementById(modalId + "-textarea");
-      if (ta && ta.focus) try { ta.focus(); } catch (_) {}
+      focusTextarea();
 
       // Capture in the background. Modal is excluded via ignoreElements,
       // so this is safe even though the modal is now visible.
       var hintEl = deps.document.getElementById(modalId + "-hint");
       var previewEl = deps.document.getElementById(modalId + "-preview");
-      captureScreenshotDetailed(deps, cfg).then(function (r) {
+      captureScreenshotDetailed(deps, cfg, area).then(function (r) {
         if (!r.dataUrl) reportCaptureFailure(r);
         // The modal may have been closed (or closed and reopened) mid-capture;
         // this result belongs to the one that asked for it, and only that one.
@@ -1576,11 +1708,17 @@
           if (id === modalId) movedModal = true;
         }
       });
+      var form = doc.getElementById(modalId);
+      // The page behind follows the form wherever it went — moved here, or
+      // pulled back out of a removed dialog before this ran.
+      if (form && form.parentNode !== inertHost) inertBehind();
+      // The form went without closeModal (the host cleared the page): end it
+      // properly, or the page would stay inert and unscrollable.
+      if (!form && (scrollLocked || inerted.length)) closeModal();
       // openModal focused the textarea while the form was still outside the
       // dialog (inert), and moving a node drops focus: give it back.
       if (movedModal) {
-        var ta = doc.getElementById(modalId + "-textarea");
-        if (ta && ta.focus) try { ta.focus(); } catch (_) {}
+        focusTextarea();
       }
     }
     function keepReachable() {
@@ -1678,6 +1816,7 @@
     canvasState: canvasState,
     captureScreenshot: captureScreenshot,
     captureScreenshotDetailed: captureScreenshotDetailed,
+    visibleArea: visibleArea,
     describeCaptureFailure: describeCaptureFailure,
     describePartialCapture: describePartialCapture,
     openViewer: function (src, opts) {

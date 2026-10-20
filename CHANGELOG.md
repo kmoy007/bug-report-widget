@@ -2,6 +2,34 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.7 — 2026-10-20
+
+From LeapHQ bug-20261020-213458, filed on an iPhone (iOS 26 Safari); both halves reproduced in the iOS
+Simulator first.
+
+- **Fix: the screenshot left out the bottom of the screen on iOS.** The capture was cropped to
+  `documentElement.clientHeight`, which iOS Safari keeps at its smallest viewport (toolbar shown):
+  714px against 754px on screen once the toolbar collapsed on scroll. It now crops to the visual
+  viewport (`visibleArea()`: `visualViewport` offset and size, else the layout viewport), lays the
+  clone out at the layout width and the taller height (where `position: fixed; bottom: 0` sits), and
+  places same-origin frames relative to the visible area, which also makes a pinch-zoomed page come out
+  as the zoomed part. The area and the scroll position are measured in `openModal` BEFORE the form
+  opens and passed to `captureScreenshotDetailed(deps, cfg, area)`, because focusing the textarea
+  brings up the keyboard, which shrinks the visible area and scrolls the page before the capture runs.
+- **Fix: the page behind the form could be used.** On an iPhone, swiping the dimmed backdrop scrolled
+  the page underneath. While the form is open its siblings (the dialog's, inside a modal `<dialog>`)
+  are `inert`, and `touchmove`/`wheel` outside anything that scrolls inside the form are cancelled
+  (listeners, not `overflow: hidden` on `<html>`, which drops a desktop scrollbar and reflows the page
+  mid-capture); the form's box has `overscroll-behavior: contain`. The viewer and the toast are left
+  usable, an app's own `inert` is left alone, and everything is released on close. iOS's keyboard still
+  scrolls the page to show the field (`focus({preventScroll: true})` was tried and leaves the field
+  under the keyboard), so close puts the scroll back where it was when the form opened. If the form
+  leaves the page some other way (the host clears `<body>`), the dialog watcher ends it the same way,
+  so the page cannot be left inert; a form pulled back out of a removed `<dialog>` makes `<body>`'s
+  siblings inert again.
+- No option and no wire change. The button is inert while the form is open (it was already under the
+  backdrop).
+
 ## backends — bug-report-py 2.1.1, bug-report-node 1.1.1 — 2026-10-20
 
 - **Fix: `FilesystemStore` wrote a report in place, so a concurrent read saw half of it.** `put_bug`

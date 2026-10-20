@@ -3,7 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, writeFile, utimes } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile, utimes, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -18,7 +18,7 @@ const temps = async d => (await readdir(d)).filter(n => n.endsWith(".tmp"));
 
 test("a read and a listing never see a half-written report", async () => {
   const d = await tmpdir();
-  const store = new FilesystemStore(d);
+  const store = new FilesystemStore(d, { readAttempts: 1 });   // the retry must not be what hides a torn read
   const b = bug();
   await store.putBug(b, null);
   let stop = false;
@@ -70,4 +70,32 @@ test("stale temp files are swept at start and fresh ones kept", async () => {
   await utimes(old, past, past);
   await new FilesystemStore(d)._ready;
   assert.deepEqual(await readdir(d), [".new.tmp"]);
+});
+
+test("a retry reads a report that is briefly unparseable", async () => {
+  const d = await tmpdir();
+  const store = new FilesystemStore(d);
+  const b = bug();
+  await store.putBug(b, null);
+  const file = path.join(d, `${b.id}.json`);
+  const good = await readFile(file, "utf8");
+  await writeFile(file, "");
+  setTimeout(() => writeFile(file, good), 30);
+  assert.equal((await store.getBug(b.id)).id, b.id);
+});
+
+test("a failing temp write leaves the report intact and no temp", async t => {
+  if (process.platform === "win32" || (process.getuid && process.getuid() === 0)) return t.skip("needs a non-root POSIX user");
+  const d = await tmpdir();
+  const store = new FilesystemStore(d);
+  const b = bug();
+  await store.putBug(b, null);
+  const file = path.join(d, `${b.id}.json`);
+  const before = await readFile(file, "utf8");
+  await chmod(d, 0o555);                       // the temp cannot be created
+  try {
+    await assert.rejects(store.updateStatus(b.id, "triaged"));
+  } finally { await chmod(d, 0o755); }
+  assert.equal(await readFile(file, "utf8"), before);
+  assert.deepEqual(await temps(d), []);
 });

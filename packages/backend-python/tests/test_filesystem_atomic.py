@@ -28,7 +28,8 @@ def _temps(d):
     return [n for n in os.listdir(d) if n.endswith(".tmp")]
 
 
-def test_a_read_and_a_listing_never_see_a_half_written_report(tmp_path):
+def test_a_read_and_a_listing_never_see_a_half_written_report(tmp_path, monkeypatch):
+    monkeypatch.setattr("bug_report.store.READ_ATTEMPTS", 1)    # the retry must not be what hides a torn read
     store = FilesystemStore(tmp_path)
     bug = _bug()
     store.put_bug(bug, None)
@@ -136,3 +137,36 @@ def test_stale_temp_files_are_swept_at_start_and_fresh_ones_kept(tmp_path):
     os.utime(old, (time.time() - 3600,) * 2)
     FilesystemStore(tmp_path)
     assert sorted(os.listdir(tmp_path)) == [".new.tmp"]
+
+
+def test_a_new_report_has_a_plain_writes_mode(tmp_path):
+    old = os.umask(0o022)
+    try:
+        store = FilesystemStore(tmp_path)
+        bug = _bug()
+        store.put_bug(bug, b"\x89PNG")
+    finally:
+        os.umask(old)
+    for name in (f"{bug.id}.json", f"{bug.id}.png"):
+        assert (tmp_path / name).stat().st_mode & 0o777 == 0o644
+
+
+def test_a_read_retries_a_report_that_is_briefly_unparseable(tmp_path):
+    store = FilesystemStore(tmp_path)
+    bug = _bug()
+    store.put_bug(bug, None)
+    path = tmp_path / f"{bug.id}.json"
+    good = path.read_text()
+    path.write_text("")
+    calls = []
+    real = type(path).read_text
+
+    def heal(self, *a, **k):
+        calls.append(1)
+        if len(calls) == 2:
+            path.write_text(good)
+        return real(self, *a, **k)
+
+    with mock.patch.object(type(path), "read_text", heal):
+        assert store.get_bug(bug.id).id == bug.id
+    assert len(calls) >= 2

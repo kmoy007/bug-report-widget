@@ -15,7 +15,10 @@ All notable changes to this monorepo.
   store opens. A report that still will not parse is re-read up to 5 times (20 ms apart) before
   `get_bug` raises or `list_bugs` skips it. If the share refuses the rename (SMB can, while another
   handle holds the target open) the write falls back to the old in-place write and logs a warning.
-  The audit file is appended to, never rewritten, and is unchanged. Not verified on a live Azure Files
+  The audit file is appended to, never rewritten, and is unchanged. A new report or screenshot gets a plain write's mode (0666 & ~umask); a rewrite
+  installs a new file, so a mode, owner or ACL set by hand on a report does not survive its next PATCH.
+  Node: `new FilesystemStore(root, { readAttempts })` sets the re-read count. Known and accepted: the in-place fallback can still tear a read (and a screenshot read
+  has no retry); an unparseable report costs ~80 ms each time it is read. Not verified on a live Azure Files
   mount by this change; the fallback is the guard.
 
 ## widget v1.6.6 — 2026-10-15

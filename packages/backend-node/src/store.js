@@ -146,12 +146,12 @@ const STALE_TMP_MS = 10 * 60 * 1000;
 
 // Parse a JSON file, re-reading briefly if it will not parse (a writer that
 // could not rename, or a report written by an older version of this store).
-async function readJson(file) {
+async function readJson(file, attempts = READ_ATTEMPTS) {
   for (let attempt = 1; ; attempt++) {
     try {
       return JSON.parse(await readFile(file, "utf8"));
     } catch (e) {
-      if (e.code === "ENOENT" || attempt >= READ_ATTEMPTS) throw e;
+      if (e.code === "ENOENT" || attempt >= attempts) throw e;
       await new Promise(r => setTimeout(r, READ_PAUSE_MS));
     }
   }
@@ -162,8 +162,10 @@ async function readJson(file) {
 // ----------------------------------------------------------------------
 
 export class FilesystemStore {
-  constructor(root) {
+  // readAttempts: how often a report that will not parse is re-read (tests set 1)
+  constructor(root, { readAttempts = READ_ATTEMPTS } = {}) {
     this.root = root;
+    this._readAttempts = readAttempts;
     this._ready = mkdir(root, { recursive: true }).then(() => this._sweepStaleTemps());
   }
   // A crash between creating a temp file and the rename leaves it behind.
@@ -185,7 +187,7 @@ export class FilesystemStore {
   async getBug(id) {
     await this._ready;
     try {
-      return makeBugRecord(await readJson(this._path(id, ".json")));
+      return makeBugRecord(await readJson(this._path(id, ".json"), this._readAttempts));
     } catch (e) {
       if (e.code === "ENOENT") throw new NotFound(id);
       throw new StoreError(`could not read ${id}: ${e.message}`);
@@ -197,7 +199,7 @@ export class FilesystemStore {
     for (const name of entries) {
       if (!name.startsWith("bug-") || !name.endsWith(".json") || name.endsWith(".audit.jsonl")) continue;
       try {
-        const rec = makeBugRecord(await readJson(path.join(this.root, name)));
+        const rec = makeBugRecord(await readJson(path.join(this.root, name), this._readAttempts));
         if (rec.addedAt < sinceIso) continue;
         if (status && rec.status !== status) continue;
         yield rec;

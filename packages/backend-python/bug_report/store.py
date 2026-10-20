@@ -13,10 +13,15 @@ Two implementations ship out of the box:
 from __future__ import annotations
 
 import json
+import logging
+import os
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Protocol
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +163,65 @@ class InMemoryStore:
             raise NotFound(bug_id)
         return self._screenshots[bug_id]
 
+# ---------------------------------------------------------------------------
+# Atomic writes
+# ---------------------------------------------------------------------------
+
+READ_ATTEMPTS = 5          # a report that will not parse is re-read this many times…
+READ_PAUSE = 0.02          # …this many seconds apart, before it is called unreadable
+STALE_TMP_SECONDS = 600    # a temp file older than this is a crashed write's leftover
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` so a reader sees the old file or the new one.
+
+    ``Path.write_text`` truncates, then writes: a reader in between sees an empty
+    or partial file, and a crash leaves one behind. Instead: a temp file beside
+    the target (same directory, so the rename stays on one filesystem), fsynced,
+    then ``os.replace``d over it. The temp is dot-prefixed and ends ``.tmp``, so
+    the ``bug-*.json`` listing never matches it.
+
+    Azure Files (SMB) supports rename over an existing file but can refuse it
+    while another handle holds the target open; a refused replace falls back to
+    the in-place write this store always did (readers retry, see ``_read_json``).
+    """
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+    except BaseException:
+        # the temp write failed: the target is untouched, so do NOT fall back to
+        # an in-place write (it would truncate the good copy)
+        _unlink_quietly(tmp)
+        raise
+    try:
+        os.replace(tmp, path)
+    except OSError as e:
+        _unlink_quietly(tmp)
+        log.warning("bug store: os.replace refused for %s (%s); writing in place", path.name, e)
+        path.write_bytes(data)
+
+
+def _unlink_quietly(path) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _read_json(path: Path):
+    """Parse a JSON file, re-reading briefly if it will not parse (a writer that
+    could not rename, or a report written by an older version of this store)."""
+    for attempt in range(READ_ATTEMPTS):
+        try:
+            return json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            if attempt == READ_ATTEMPTS - 1:
+                raise
+            time.sleep(READ_PAUSE)
+
 
 # ---------------------------------------------------------------------------
 # FilesystemStore — production-grade for single-host apps
@@ -177,6 +241,17 @@ class FilesystemStore:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        self._sweep_stale_temps()
+
+    def _sweep_stale_temps(self) -> None:
+        """A crash between creating a temp file and the replace leaves it behind."""
+        cutoff = time.time() - STALE_TMP_SECONDS
+        for p in self.root.glob(".*.tmp"):
+            try:
+                if p.stat().st_mtime < cutoff:
+                    p.unlink()
+            except OSError:
+                pass
 
     def _rec_path(self, bug_id: str) -> Path:
         return self.root / f"{bug_id}.json"
@@ -189,18 +264,18 @@ class FilesystemStore:
 
     def put_bug(self, bug, screenshot_png):
         if screenshot_png is not None:
-            self._shot_path(bug.id).write_bytes(screenshot_png)
+            _atomic_write(self._shot_path(bug.id), screenshot_png)
             bug.screenshot = True
         # Convert dataclass → dict carefully (we want camelCase on-disk shape).
         payload = asdict(bug)
-        self._rec_path(bug.id).write_text(json.dumps(payload, indent=2))
+        _atomic_write(self._rec_path(bug.id), json.dumps(payload, indent=2).encode())
 
     def get_bug(self, bug_id):
         p = self._rec_path(bug_id)
         if not p.exists():
             raise NotFound(bug_id)
         try:
-            data = json.loads(p.read_text())
+            data = _read_json(p)
         except (OSError, json.JSONDecodeError) as e:
             raise StoreError(f"could not read {bug_id}") from e
         return BugRecord(**data)
@@ -210,7 +285,7 @@ class FilesystemStore:
             if p.name.endswith(".audit.jsonl"):
                 continue
             try:
-                data = json.loads(p.read_text())
+                data = _read_json(p)
             except (OSError, json.JSONDecodeError):
                 continue
             rec = BugRecord(**data)
@@ -227,6 +302,8 @@ class FilesystemStore:
         return rec
 
     def append_audit(self, bug_id, entry):
+        # An append, not a rewrite: it never truncates, and one short line is a
+        # single O_APPEND write, so a reader sees whole lines (list_audit skips a torn one).
         with open(self._audit_path(bug_id), "a") as f:
             f.write(json.dumps(entry.to_dict()) + "\n")
 

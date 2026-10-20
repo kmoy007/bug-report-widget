@@ -2,6 +2,22 @@
 
 All notable changes to this monorepo.
 
+## backends — bug-report-py 2.1.1, bug-report-node 1.1.1 — 2026-10-20
+
+- **Fix: `FilesystemStore` wrote a report in place, so a concurrent read saw half of it.** `put_bug`
+  (and every PATCH, which rewrites the report) truncated the file and then wrote it: a `get_bug`
+  between the two raised `StoreError("could not read ...")`, `list_bugs` silently dropped the report,
+  and a crash mid-write left a corrupt one (StoppageViewer CI flake, "could not read
+  bug-20261020-043638-a558fe"; production stores are Azure Files mounts, where the window is wider).
+  Both backends now write the report and the screenshot to a dot-prefixed `.tmp` beside the target,
+  fsync it and rename it over the target, so a reader sees the old file or the new one. Temp files
+  never match the `bug-*.json` listing and a crash's leftovers older than 10 minutes are swept when the
+  store opens. A report that still will not parse is re-read up to 5 times (20 ms apart) before
+  `get_bug` raises or `list_bugs` skips it. If the share refuses the rename (SMB can, while another
+  handle holds the target open) the write falls back to the old in-place write and logs a warning.
+  The audit file is appended to, never rewritten, and is unchanged. Not verified on a live Azure Files
+  mount by this change; the fallback is the guard.
+
 ## widget v1.6.6 — 2026-10-15
 
 - **Fix: a cross-origin `<video>` sent the whole screenshot to the old engine, and the old engine

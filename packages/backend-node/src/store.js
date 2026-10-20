@@ -12,7 +12,8 @@
 // Wire-format DTOs are camelCase (matching openapi.yaml). BugRecord is the
 // on-store shape; the router maps it to summary / full DTOs.
 
-import { mkdir, readFile, readdir, writeFile, unlink, appendFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile, unlink, appendFile, open, rename, stat } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 
 export class StoreError extends Error {}
@@ -108,26 +109,83 @@ export class InMemoryStore {
 }
 
 // ----------------------------------------------------------------------
+// Atomic writes
+// ----------------------------------------------------------------------
+
+// writeFile truncates, then writes: a reader in between sees an empty or
+// partial file, and a crash leaves one behind. Write a dot-prefixed ".tmp"
+// beside the target (so the "bug-*.json" listing never matches it), fsync it,
+// and rename it over the target. A share that refuses the rename (Azure Files
+// can, while another handle holds the target open) gets the in-place write.
+async function atomicWrite(file, data) {
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${randomBytes(6).toString("hex")}.tmp`);
+  try {
+    const fh = await open(tmp, "w");
+    try {
+      await fh.writeFile(data);
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+  } catch (e) {
+    await unlink(tmp).catch(() => {});
+    throw e;   // the target is untouched: do NOT fall back to an in-place write
+  }
+  try {
+    await rename(tmp, file);
+  } catch (e) {
+    await unlink(tmp).catch(() => {});
+    console.warn(`bug store: rename refused for ${path.basename(file)} (${e.code}); writing in place`);
+    await writeFile(file, data);
+  }
+}
+
+const READ_ATTEMPTS = 5;
+const READ_PAUSE_MS = 20;
+const STALE_TMP_MS = 10 * 60 * 1000;
+
+// Parse a JSON file, re-reading briefly if it will not parse (a writer that
+// could not rename, or a report written by an older version of this store).
+async function readJson(file) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return JSON.parse(await readFile(file, "utf8"));
+    } catch (e) {
+      if (e.code === "ENOENT" || attempt >= READ_ATTEMPTS) throw e;
+      await new Promise(r => setTimeout(r, READ_PAUSE_MS));
+    }
+  }
+}
+
+// ----------------------------------------------------------------------
 // FilesystemStore — single-host production
 // ----------------------------------------------------------------------
 
 export class FilesystemStore {
   constructor(root) {
     this.root = root;
-    this._ready = mkdir(root, { recursive: true });
+    this._ready = mkdir(root, { recursive: true }).then(() => this._sweepStaleTemps());
+  }
+  // A crash between creating a temp file and the rename leaves it behind.
+  async _sweepStaleTemps() {
+    const cutoff = Date.now() - STALE_TMP_MS;
+    for (const name of await readdir(this.root).catch(() => [])) {
+      if (!name.startsWith(".") || !name.endsWith(".tmp")) continue;
+      const p = path.join(this.root, name);
+      try { if ((await stat(p)).mtimeMs < cutoff) await unlink(p); } catch { /* raced, gone */ }
+    }
   }
   _path(id, suffix) { return path.join(this.root, `${id}${suffix}`); }
   async putBug(bug, shot) {
     await this._ready;
     const rec = makeBugRecord(bug);
-    if (shot && shot.length) { await writeFile(this._path(rec.id, ".png"), shot); rec.screenshot = true; }
-    await writeFile(this._path(rec.id, ".json"), JSON.stringify(rec, null, 2));
+    if (shot && shot.length) { await atomicWrite(this._path(rec.id, ".png"), shot); rec.screenshot = true; }
+    await atomicWrite(this._path(rec.id, ".json"), JSON.stringify(rec, null, 2));
   }
   async getBug(id) {
     await this._ready;
     try {
-      const data = await readFile(this._path(id, ".json"), "utf8");
-      return makeBugRecord(JSON.parse(data));
+      return makeBugRecord(await readJson(this._path(id, ".json")));
     } catch (e) {
       if (e.code === "ENOENT") throw new NotFound(id);
       throw new StoreError(`could not read ${id}: ${e.message}`);
@@ -139,8 +197,7 @@ export class FilesystemStore {
     for (const name of entries) {
       if (!name.startsWith("bug-") || !name.endsWith(".json") || name.endsWith(".audit.jsonl")) continue;
       try {
-        const data = await readFile(path.join(this.root, name), "utf8");
-        const rec = makeBugRecord(JSON.parse(data));
+        const rec = makeBugRecord(await readJson(path.join(this.root, name)));
         if (rec.addedAt < sinceIso) continue;
         if (status && rec.status !== status) continue;
         yield rec;
@@ -150,7 +207,7 @@ export class FilesystemStore {
   async updateStatus(id, newStatus) {
     const rec = await this.getBug(id);
     rec.status = newStatus;
-    await writeFile(this._path(rec.id, ".json"), JSON.stringify(rec, null, 2));
+    await atomicWrite(this._path(rec.id, ".json"), JSON.stringify(rec, null, 2));
     return rec;
   }
   async appendAudit(id, entry) {

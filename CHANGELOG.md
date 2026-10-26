@@ -2,6 +2,24 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.8 — 2026-10-26
+
+From the daily report (hq.helloleap.ai/daily-report): its floating "Run report again" button was
+missing from bug screenshots.
+
+- **Fix: `position: fixed` elements were left out of, or misplaced in, the screenshot when the page was
+  scrolled.** `capture-engine.js` cropped by putting `transform: translate(-x, -y)` on the cloned
+  `<body>`; a transformed element is the containing block of its fixed descendants, so they were laid
+  out against the body, not the screen. Scrolled mid-page, a bottom-right button was not in the picture
+  at all; at the top it was 8px off (the body's margin). The crop is now `position: relative` with
+  `top`/`left`, which leaves fixed elements placed against the canvas, i.e. the screen. The clone's
+  computed `inset-block`/`inset-inline` are cleared, since Chromium serialises them after `top` and they
+  would win. In-flow content is unchanged. The html2canvas fallback already drew fixed elements right.
+- **New: a browser test** (`packages/widget/tests/browser`, Python + Playwright, Chromium and WebKit) that
+  captures a page scrolled to the top, mid-page and the bottom and checks a fixed button, a fixed bar
+  and a scrolled marker land where the page shows them. See the widget README for how to run it.
+- No option and no wire change.
+
 ## widget v1.6.7 — 2026-10-20
 
 From LeapHQ bug-20261020-213458, filed on an iPhone (iOS 26 Safari); both halves reproduced in the iOS

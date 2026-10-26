@@ -37,12 +37,17 @@ test("blank: unreadable pixels count as NOT blank (a fallback render would not r
   assert.equal(pure.blank(c), false);
 });
 
-test("toImageOptions: scale becomes pixelRatio; a crop becomes width/height and a shifting transform", () => {
+test("toImageOptions: scale becomes pixelRatio; a crop becomes width/height and a relative shift", () => {
   const o = pure.toImageOptions({ scale: 2, x: 30, y: 400, width: 800, height: 600 });
   assert.equal(o.pixelRatio, 2);
   assert.equal(o.width, 800);
   assert.equal(o.height, 600);
-  assert.equal(o.style.transform, "translate(-30px,-400px)");
+  assert.equal(o.style.position, "relative");
+  assert.equal(o.style.left, "-30px");
+  assert.equal(o.style.top, "-400px");
+  assert.equal(o.style.insetBlock, "", "the clone's computed inset-block would override top");
+  // a transform would make the body the containing block of fixed elements (tests/browser)
+  assert.equal("transform" in o.style, false);
   const plain = pure.toImageOptions({});
   assert.equal(plain.pixelRatio, 1);
   assert.equal("style" in plain, false);

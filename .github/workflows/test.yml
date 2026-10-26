@@ -1,0 +1,47 @@
+name: test
+
+# One job, run on every PR and every push to main, so its check can be the
+# required one on main (a required check that skips some PRs blocks them for ever).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          npm ci --prefix packages/backend-node
+          pip install -r packages/widget/tests/browser/requirements.txt -r e2e/requirements.txt \
+            -e "packages/backend-python[test]" -e "packages/cli[test]"
+          python -m playwright install --with-deps chromium webkit
+
+      - name: Node unit tests (widget, triage-ui, backend-node)
+        run: |
+          npm test --prefix packages/widget
+          npm test --prefix packages/triage-ui
+          npm test --prefix packages/backend-node
+
+      - name: Python unit tests (backend-python, cli)
+        run: python -m pytest packages/backend-python/tests packages/cli/tests
+
+      - name: Widget browser tests (Chromium, WebKit)
+        run: python -m pytest -v packages/widget/tests/browser
+
+      - name: Contract tests, both backends (e2e)
+        run: python -m pytest -v e2e

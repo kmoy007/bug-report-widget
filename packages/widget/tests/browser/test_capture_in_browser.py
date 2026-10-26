@@ -16,7 +16,10 @@ import pytest
 from playwright.sync_api import sync_playwright
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
-SCRIPTS = ["html2canvas.min.js", "html-to-image.js", "capture-engine.js", "bug-report.js"]
+# html2canvas is replaced by one that fails before capture-engine wraps it: its fallback already
+# drew fixed elements right, so a capture it rescued would pass without testing html-to-image.
+NO_FALLBACK = "window.html2canvas = () => Promise.reject(new Error('fallback used'));"
+SCRIPTS = ["html2canvas.min.js", NO_FALLBACK, "html-to-image.js", "capture-engine.js", "bug-report.js"]
 VIEW = {"width": 1000, "height": 700}
 
 # 4000px of in-flow blocks, a pale-green marker 1500px down the page, a fixed bar along the top
@@ -58,7 +61,7 @@ def page(request):
         pg = browser.new_page(viewport=VIEW)
         pg.set_content(PAGE)
         for name in SCRIPTS:
-            pg.add_script_tag(content=(SRC / name).read_text())
+            pg.add_script_tag(content=name if name == NO_FALLBACK else (SRC / name).read_text())
         yield pg
         browser.close()
 
@@ -66,7 +69,7 @@ def page(request):
 def capture(page, scroll_y, ids):
     page.evaluate(f"window.scrollTo(0, {scroll_y})")
     r = page.evaluate(CAPTURE, ids)
-    assert "at" in r, f"no screenshot: {r.get('reason')}"
+    assert "at" in r, f"no screenshot from html-to-image: {r.get('reason')}"
     return r["at"]
 
 

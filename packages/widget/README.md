@@ -172,7 +172,7 @@ html2canvas an `onclone` hook that rewrites every `color()`, `color-mix()`, `okl
 `lab()`, `lch()` and `hwb()` value in the cloned page as the `rgba()` the browser itself resolves it
 to, `::before`/`::after` included.
 
-## Known gaps (as of 1.6.7)
+## Known gaps (as of 1.6.8)
 
 Found while rolling the widget out to seven apps (2026-10-09/12). Not bugs worth blocking on; each is
 a real edge a later version should close.
@@ -210,9 +210,12 @@ a real edge a later version should close.
 - **Only a fixed list of colour properties is rewritten** (`color`, backgrounds, borders, outline, text
   decoration and stroke, shadows, `fill`/`stroke`, `list-style-image`): the ones html2canvas reads, and a few
   more. A colour function nested more than one level deep inside another is left as it was.
-- **No browser test in this repo.** Drawing, dialog reparenting and pinch-zoom are proven only by the
-  consuming apps' Playwright suites (stoppageviewer's is the reference); the Node tests cover the maths,
-  the filing path and the capture engine's pure parts.
+- **With `capture-engine.js`, an absolutely positioned element sits off by `<body>`'s margin** (8px by
+  default) when it is placed against the page rather than a positioned parent: the cropped clone's body is
+  its containing block. Seen in the 1.6.8 browser check; it was the same with the transform before it.
+- **Only the capture engine has a browser test** (`tests/browser`, since 1.6.8: where fixed and scrolled
+  content lands in the picture). Dialog reparenting, pinch-zoom and touch are proven only by the consuming
+  apps' Playwright suites (stoppageviewer's is the reference).
 
 ## Opting elements out of capture
 
@@ -256,4 +259,15 @@ cd packages/widget
 npm test
 ```
 
-Pure helpers (`buildPostBody`, `isBlankCanvas`, `pinchView`, …) and the controller and viewer, driven through a small fake DOM (`tests/fake-dom.js`, no jsdom), are tested in Node with the built-in test runner. Nothing here runs in a real browser: real touch, top-layer inertness and rendering are proved by each consuming app's own Playwright suite.
+Pure helpers (`buildPostBody`, `isBlankCanvas`, `pinchView`, …) and the controller and viewer, driven through a small fake DOM (`tests/fake-dom.js`, no jsdom), are tested in Node with the built-in test runner.
+
+Where things land in the screenshot is tested in real Chromium and WebKit (Playwright, Python), separately:
+
+```bash
+cd packages/widget
+pip install -r tests/browser/requirements.txt
+python -m playwright install chromium webkit
+python -m pytest tests/browser
+```
+
+Real touch and top-layer inertness are proved by each consuming app's own Playwright suite.

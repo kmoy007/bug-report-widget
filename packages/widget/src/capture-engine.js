@@ -232,9 +232,14 @@
     };
     if (opts.width && opts.height) {
       o.width = opts.width; o.height = opts.height;
-      // draw the page shifted so the visible part lands in the canvas
-      o.style = { transform: "translate(" + -(opts.x || 0) + "px," + -(opts.y || 0) + "px)",
-                  transformOrigin: "0 0" };
+      // Draw the page shifted so the visible part lands in the canvas. Not by a transform: a
+      // transformed body is the containing block of every position:fixed element, so they were
+      // laid out against the page, not the screen, and a fixed button was missing from a page
+      // scrolled mid-way (1.6.8). A relative offset leaves them on the canvas, which is the
+      // screen. The clone carries the computed inset-block/inset-inline, which Chromium writes
+      // after `top` and so wins over it; they are cleared.
+      o.style = { position: "relative", insetBlock: "", insetInline: "",
+                  left: -(opts.x || 0) + "px", top: -(opts.y || 0) + "px" };
     }
     return o;
   }

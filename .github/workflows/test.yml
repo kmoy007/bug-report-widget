@@ -9,7 +9,7 @@ on:
 
 concurrency:
   group: test-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -24,15 +24,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Widget unit tests (Node)
-        working-directory: packages/widget
-        run: npm test
-
       - name: Install test dependencies
         run: |
-          pip install -r packages/widget/tests/browser/requirements.txt -r e2e/requirements.txt
-          python -m playwright install --with-deps chromium webkit
           npm ci --prefix packages/backend-node
+          pip install -r packages/widget/tests/browser/requirements.txt -r e2e/requirements.txt \
+            -e "packages/backend-python[test]" -e "packages/cli[test]"
+          python -m playwright install --with-deps chromium webkit
+
+      - name: Node unit tests (widget, triage-ui, backend-node)
+        run: |
+          npm test --prefix packages/widget
+          npm test --prefix packages/triage-ui
+          npm test --prefix packages/backend-node
+
+      - name: Python unit tests (backend-python, cli)
+        run: python -m pytest packages/backend-python/tests packages/cli/tests
 
       - name: Widget browser tests (Chromium, WebKit)
         run: python -m pytest -v packages/widget/tests/browser

@@ -14,7 +14,9 @@ The design pattern that motivated this lives at [design-patterns/bug-report-patt
 | [`packages/backend-python`](packages/backend-python) | Python (Flask blueprint) | `from bug_report import blueprint, FilesystemStore` — wire it into any Flask app. |
 | [`packages/backend-node`](packages/backend-node) | Node (Express + Azure adapter) | `import { createBugsRouter } from 'bug-report-node'` — wire it into Express, Azure Functions, or your own server. |
 | [`packages/cli`](packages/cli) | Python | `report-bug "title" "details"` — what your tmux-spawned Claudes and CI jobs call to file bugs. |
-| [`e2e/`](e2e) | Playwright | Boots the Python and Node backends and drives the same scenarios against both. |
+| [`e2e/`](e2e) | pytest + requests | Boots the Python and Node backends and drives the same scenarios against both. |
+
+Every PR and push to `main` runs the `test` check ([`.github/workflows/test.yml`](.github/workflows/test.yml)): every package's unit tests, the widget's browser tests and the `e2e/` contract suite. A new package's tests go in that workflow too.
 
 ## Who uses it
 

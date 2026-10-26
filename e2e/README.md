@@ -40,4 +40,4 @@ If a test passes against Python but fails against Node (or vice versa), that's e
 
 The widget is browser-agnostic and exercised in each consumer app's own Playwright suite (claude-tmux-dashboard, leap-timesheet). Here, the question is "do both backends honor the wire format?" — that's an HTTP-level question, not a browser one. Plain `requests` is faster and clearer.
 
-When the widget needs cross-browser regression coverage, that lives in `packages/widget/tests/widget.spec.ts` (TODO).
+When the widget needs cross-browser regression coverage, that lives in [`packages/widget/tests/browser`](../packages/widget/tests/browser) (Playwright, Chromium and WebKit).

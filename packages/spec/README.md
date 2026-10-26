@@ -7,7 +7,7 @@ The wire-level contract every bug-report backend honors. Single source of truth.
 - `types.ts` — TypeScript types for the JSON DTOs (handy if your Node backend or frontend wants type-checked clients).
 - `types.py` — Python `TypedDict`s for the same DTOs.
 
-If you add a field to the wire format, change it here first. The lint rule in CI fails the build if the backends drift from the spec.
+If you add a field to the wire format, change it here first. The e2e contract suite, run in CI on every PR, fails the build if the backends drift from the spec.
 
 ## Audit-flow invariant
 
